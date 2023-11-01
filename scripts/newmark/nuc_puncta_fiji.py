@@ -4,6 +4,9 @@
 #@ UIService ui
 #@ IOService io
 #@ Integer radius(label="FFT Radius:", value=0)
+#@ String (visibility=MESSAGE, value="<html>Enter size range (labels within this range are retained):", required=false) msg
+#@ Integer min_size(label="Minimum size (pixels):", min=0, value=0)
+#@ Integer max_size(label="Maximum size (pixels):", value=0)
 #@output ImgPlus output
 
 from net.imglib2.img.display.imagej import ImageJFunctions
@@ -12,8 +15,45 @@ from net.imglib2.util import Util
 from net.imglib2.img import Img
 from net.imglib2.algorithm.labeling.ConnectedComponents import StructuringElement
 from net.imglib2.roi import Regions
-from net.imglib2.roi.labeling import LabelRegions
+from net.imglib2.roi.labeling import LabelRegions, ImgLabeling
 from org.scijava.table import DefaultGenericTable
+
+
+def remove_label(sample):
+    """
+    Set the given sample region pixel values to 0.
+
+    :param: A sample region.
+    """
+    # get the sample region's cursor
+    c = sample.cursor()
+    # set all pixels within the sample region to 0
+    while c.hasNext():
+        c.fwd()
+        c.get().set(0)
+
+
+def filter_labeling(labeling, min_size, max_size):
+    """
+    Filter an index image's labels by minimum/maximum pixel size exclusion.
+
+    :param labeling: A labeling created from the index image.
+    :param min_size: Minimum label size.
+    :param max_size: Maximum label size.
+    """
+    # get the label regions from the labeling
+    index_img = labeling.getIndexImg()
+    regs = LabelRegions(labeling)
+    for r in regs:
+        # get a sample region and compute the size
+        sample = Regions.sample(r, index_img)
+        size = float(str(ops.stats().size(sample)))
+        # if region size is outside of min/max range set to zero
+        if size <= float(min_size) or size >= float(max_size):
+            remove_label(sample)
+
+    return cs.convert(index_img, ImgLabeling)
+
 
 def fft_high_pass(image):
     """
@@ -58,12 +98,14 @@ def fft_high_pass(image):
 
     return ops.filter().ifft(recon, fft_img)
 
+
 def split_channels(image, ch_axis=2):
     channels = []
     for i in range(image.dimensionsAsLongArray()[ch_axis]):
         channels.append(ops.transform().hyperSliceView(image, ch_axis, i))
     
     return channels
+
 
 def segment_puncta(image, z_axis=2):
     # run 2D FFT on each slice at given radius
@@ -81,21 +123,27 @@ def segment_puncta(image, z_axis=2):
 
     return labeling
 
+
 def compute_stats(labeling, image):
     # extract regions
     regs = LabelRegions(labeling)
     reg_labels = regs.getExistingLabels()
 
     # set up table
-    table = DefaultGenericTable(2, len(reg_labels))
-    table.setColumnHeader(0, "size")
-    table.setColumnHeader(1, "MFI")
+    table = DefaultGenericTable(3, 0)
+    table.setColumnHeader(0, "label")
+    table.setColumnHeader(1, "size")
+    table.setColumnHeader(2, "MFI")
 
+    i = 0
     for r in regs:
         sample = Regions.sample(r, image)
-        table.set("size", int(r.getLabel()), ops.stats().size(sample).getRealDouble())
-        table.set("MFI", int(r.getLabel()), ops.stats().mean(sample).getRealDouble())
-
+        table.appendRow()
+        table.set("label", i, int(r.getLabel()))
+        table.set("size", i, ops.stats().size(sample).getRealDouble())
+        table.set("MFI", i, ops.stats().mean(sample).getRealDouble())
+        i += 1
+    
     return table
 
 # split channels
@@ -103,6 +151,7 @@ chs = split_channels(img)
 
 # segment objects
 puncta_labeling = segment_puncta(chs[1])
+puncta_labeling = filter_labeling(puncta_labeling, min_size, max_size)
 
 # compute stats
 puncta_seg_results_table = compute_stats(puncta_labeling, chs[1])
