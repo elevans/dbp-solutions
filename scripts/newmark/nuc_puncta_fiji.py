@@ -1,5 +1,6 @@
 #@ ImgPlus img
 #@ OpService ops
+#@ CommandService cmd
 #@ ConvertService cs
 #@ UIService ui
 #@ IOService io
@@ -16,7 +17,9 @@ from net.imglib2.img import Img
 from net.imglib2.algorithm.labeling.ConnectedComponents import StructuringElement
 from net.imglib2.roi import Regions
 from net.imglib2.roi.labeling import LabelRegions, ImgLabeling
+from net.imagej.axis import Axes, DefaultLinearAxis
 from org.scijava.table import DefaultGenericTable
+from de.csbdresden.stardist import StarDist2D
 
 
 def remove_label(sample):
@@ -124,6 +127,25 @@ def segment_puncta(image, z_axis=2):
     return labeling
 
 
+def segment_nuclei(image):
+    """
+    Run StarDist2D and return a label.
+    """
+    # set 3rd axis to time
+    image = cs.convert(image, Img)
+    t_axis = Axes.get("Time")
+    image.setAxis(DefaultLinearAxis(t_axis), 2)
+
+    # run StarDist2D on the timeseries
+    res = cmd.run(StarDist2D,
+                  False,
+                  "input", image,
+                  "modelChoice", "Versatile (fluorescent nuclei)",
+                  ).get()
+
+    return res.getOutput("label")
+
+
 def compute_stats(labeling, image):
     # extract regions
     regs = LabelRegions(labeling)
@@ -152,6 +174,7 @@ chs = split_channels(img)
 # segment objects
 puncta_labeling = segment_puncta(chs[1])
 puncta_labeling = filter_labeling(puncta_labeling, min_size, max_size)
+nuclei_labeling = segment_nuclei(chs[3])
 
 # compute stats
 puncta_seg_results_table = compute_stats(puncta_labeling, chs[1])
@@ -159,3 +182,4 @@ puncta_seg_results_table = compute_stats(puncta_labeling, chs[1])
 # display results
 ui.show(puncta_labeling.getIndexImg())
 ui.show(puncta_seg_results_table)
+ui.show(nuclei_labeling)
