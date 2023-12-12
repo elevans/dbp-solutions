@@ -4,10 +4,13 @@
 #@ ConvertService cs
 #@ UIService ui
 #@ IOService io
+#@ String fft_label(visibility=MESSAGE, value="<html><b>Fast Fourier Transform (FFT) filter settings</b></html>", required=false)
 #@ Integer radius(label="FFT Radius:", value=0)
 #@ String (visibility=MESSAGE, value="<html>Enter size range (labels within this range are retained):", required=false) msg
 #@ Integer min_size(label="Minimum size (pixels):", min=0, value=0)
 #@ Integer max_size(label="Maximum size (pixels):", value=0)
+#@ String stardist_label(visibility=MESSAGE, value="<html><b>StarDist settings</b></html>", required=false)
+#@ Float stardist_prob(label="Probablity Threshold", style="slider, format:0.00", min=0, max=1, stepsize=0.05, value=0.75)
 #@output ImgPlus output
 
 from net.imglib2.img.display.imagej import ImageJFunctions
@@ -141,6 +144,7 @@ def segment_nuclei(image):
                   False,
                   "input", image,
                   "modelChoice", "Versatile (fluorescent nuclei)",
+                  "probThresh", stardist_prob
                   ).get()
 
     return res.getOutput("label")
