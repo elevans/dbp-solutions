@@ -51,9 +51,6 @@ def segment_nuclei(image):
     # waterhsed and create ImgLabeling
     ops.image().watershed(nuc_label, nuc_seg,use_eight_connectivity,draw_watersheds,sigma,nuc_seg)
     
-    if show:
-        label_img_to_roi_manager(nuc_label)
-    
     return nuc_label
 
 
@@ -100,6 +97,7 @@ def get_sample_labels(sample):
         vals.remove(0)
    
     return vals
+
 
 def run(nuc_labeling, tar_labeling, filter=True):
     """Run the analysis component of the script.
