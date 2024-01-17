@@ -1,0 +1,11 @@
+name: cp-napari
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - pyimagej
+  - openjdk=11
+  - pip
+  - pip:
+    - "napari[all]"
+    - cellpose
