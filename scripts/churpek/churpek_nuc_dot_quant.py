@@ -3,9 +3,11 @@
 #@ OpService ops
 #@ UIService ui
 #@ ImgPlus image
-#@ Double (label="Gaussian Sigma:", style="format:#.00", min=0.0, stepsize=0.1, value=6.00) sigma
-#@ Double (label="Watershed Sigma:", style="format:#.00", min=0.0, stepsize=0.1, value=30.00) sigma
+#@ Double (label="Gaussian Sigma:", style="format:#.00", min=0.0, stepsize=0.1, value=6.00) sigma_gauss
+#@ Double (label="Watershed Sigma:", style="format:#.00", min=0.0, stepsize=0.1, value=30.00) sigma_watershed
 #@ Long (label="Mean radius:", style="format:#", min=0, stepsize=1, value=5) radius
+#@ Boolean (label="Show in ROI Manager", value=True) show_rm
+#@ Boolean (label="Show results table", value=True) show_rt
 #@output ImgPlus out
 
 from ij.plugin.frame import RoiManager
@@ -14,12 +16,13 @@ from net.imglib2.roi.labeling import LabelRegions, ImgLabeling
 from net.imglib2.roi import Regions
 from net.imglib2.algorithm.neighborhood import HyperSphereShape
 from net.imglib2.algorithm.labeling.ConnectedComponents import StructuringElement
+from org.scijava.table import DefaultGenericTable
 
 def gaussian_subtraction(img, sig):
     """Perform a gaussian subtraction.
 
     Blur the input image with the given sigma value in both
-    horizontal and vertical axes. The returned image is the
+    horizontal and vertical axes. The returned ima++ge is the
     difference between the input and blurred image.
 
     :param img: Input ImgPlus image.
@@ -51,13 +54,14 @@ def split_channels(img, ch_axis=2):
 
 
 def create_nuclei_labeling(img, thres="li"):
-    """Create a nuclear binary mask.
+    """Create the nuclei ImgLabeling.
 
-    Description
+    Apply the mean/multiply background supression scheme
+    and convert the image to an ImgLabeling with watershed.
 
-    :param img:
-    :param thres:
-    :return:
+    :param img: Input ImgPlus image.
+    :param thres: Threshold method to apply.
+    :return: An ImgLabeling
     """
     # apply mean/multiply background supression
     img = ops.convert().float32(img)
@@ -70,22 +74,23 @@ def create_nuclei_labeling(img, thres="li"):
     mask = ops.morphology().fillHoles(mask)
 
     # apply watershed
-    labeling = ops.image().watershed(None, mask, True, False, 30.0, mask)
+    labeling = ops.image().watershed(None, mask, True, False, sigma_watershed, mask)
 
     return labeling
 
 
 def create_puncta_labeling(img, thres="huang"):
-    """Create a puncta binary mask.
+    """Create the puncta ImgLabeling.
 
-    Description
+    Apply a Gaussian blut subtraction and convert the
+    image to an ImgLabeling with CCA.
 
-    :param img:
-    :param thres:
-    :return:
+    :param img: Input ImgPlus image.
+    :param thres: Threshold method to apply.
+    :return: An ImgLabeling
     """
     # suppress background and threshold puncta
-    img_sub = gaussian_subtraction(img, sigma)
+    img_sub = gaussian_subtraction(img, sigma_gauss)
     mask = ops.run("threshold.{}".format(thres), img_sub)
     
     # use morphology open operation
@@ -99,6 +104,8 @@ def create_puncta_labeling(img, thres="huang"):
 
 
 def create_nuc_puncta_labeling(puncta_labeling, nuc_labeling):
+    """Create an ImgLabeling with only puncta inside nuclei.
+    """
     # create label regions
     regs = LabelRegions(nuc_labeling)
     p_index_img = puncta_labeling.getIndexImg()
@@ -148,10 +155,33 @@ def label_img_to_roi_manager(labeling):
         rm.addRoi(cs.convert(c, PolygonRoi))
 
 
-# do the analysis
+def labeling_to_results_table(p_imglabeling, n_imglabeling):
+    """Create a results table from ImgLabelings
+
+    :param p_labeling: Puncta ImgLabeling
+    """
+    # create a SciJava table with data
+    table = DefaultGenericTable(2, 0)
+    table.setColumnHeader(0, "nuclei_count")
+    table.setColumnHeader(1, "puncta_count")
+    table.appendRow()
+    table.set("nuclei_count", 0, len(n_imglabeling.getMapping().labels))
+    table.set("puncta_count", 0, len(p_imglabeling.getMapping().labels))
+    
+    return table
+
+# begin analysis
 chs = split_channels(image)
 p_labeling = create_puncta_labeling(chs[0])
 n_labeling = create_nuclei_labeling(chs[1])
 pn_labeling = create_nuc_puncta_labeling(p_labeling, n_labeling)
-label_img_to_roi_manager(n_labeling)
-label_img_to_roi_manager(pn_labeling)
+
+# get results
+if show_rt:
+    rt = labeling_to_results_table(pn_labeling, n_labeling)
+    ui.show(rt)
+
+# display in the roi manager
+if show_rm:
+    label_img_to_roi_manager(n_labeling)
+    label_img_to_roi_manager(pn_labeling)
