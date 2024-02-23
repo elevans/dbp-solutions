@@ -126,7 +126,7 @@ parser.add_argument(
 pargs = parser.parse_args()
 
 # initialize ImageJ
-ij = imagej.init(mode='interactive')
+ij = imagej.init(mode='headless')
 print(f"ImageJ2 version: {ij.getVersion()}")
 
 # import extra ImageJ2/Imglib2 resources
