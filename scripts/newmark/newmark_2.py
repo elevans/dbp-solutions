@@ -11,42 +11,12 @@ def run_cellpose(image: np.ndarray) -> np.ndarray:
     """
     Run Cellpose.
     """
-    print("[STATUS]: Running Cellpose 3D...")
+    print("[INFO]: Running Cellpose 3D...")
     model = models.CellposeModel(gpu=False, model_type="nuclei")
     ch = [0, 0]
     results = model.eval(image, channels=ch, diameter=40, do_3D=True, z_axis=0)
     
     return results[0]
-
-def run_fft_high_pass(image: np.ndarray, radius: int) -> np.ndarray:
-    """
-    Filter with a high-pass filter.
-    Allows edges, details and noise to pass through while attenuating the low-
-    frequency components (e.g. smooth variations and background)
-    """
-    print("[STATUS]: Running FFT ...")
-    # compute FFT on input image
-    fft_narr = np.fft.fftn(image)
-    fft_shift_narr = np.fft.fftshift(fft_narr)
-
-    # create circular high pass filter mask
-    rows, cols = image.shape
-    crow, ccol = rows // 2, cols // 2
-    mask = np.ones((rows, cols), dtype=np.uint8)
-
-    # set the center of the mask to zero (block the DC component)
-    mask[crow - radius:crow + radius, ccol - radius:ccol + radius] = 0
-
-    # perform high pass filter
-    shift_high_pass_result = fft_shift_narr * mask
-
-    # shift the zero-frequency components back to the corners
-    high_pass_result = np.fft.ifftshift(shift_high_pass_result)
-
-    # reconstruct the filtered image from the array
-    recon_narr = np.fft.ifftn(high_pass_result)
-
-    return np.real(recon_narr)
 
 
 def segment_nuclei(image: "net.imagej.ImgPlus") -> np.ndarray:
@@ -55,19 +25,38 @@ def segment_nuclei(image: "net.imagej.ImgPlus") -> np.ndarray:
     return res_cellpose
 
 
-def segment_puncta(image: xr.DataArray, radius:int, min_size:int, max_size:int, z_axis=0) -> np.ndarray:
-    """Segment puncta using FFT.
-    """
-    fft_results = []
-    for i in range(image.shape[z_axis]):
-        s = image[i, :, :, 1].data
-        fft_results.append(ij.py.to_java(run_fft_high_pass(s, radius)))
+def segment_puncta(image: "net.imagej.ImgPlus", min_size:int, max_size:int, z_axis=0) -> np.ndarray:
+    """Segment puncta using deconvolution and gaussian blur subtraction.
 
-    # convert the ImgPlus
-    fft_img = ij.convert().convert(Views.stack(fft_results), Img)
-    thres = ij.op().threshold().triangle(fft_img)
+    :param image: Input image
+    :param min_size: Minimum object size
+    :param max_Size: Maximum object size
+    :param z_axis: Z-axis position (default=0)
+    :return: Segmented puncta
+    """
+    # convert to float
+    image = ij.op().convert().float32(image)
+
+    # deconvolve data
+    na = 1.4
+    ri_immersion = 1.5
+    ri_sample = 1.4
+    wavelength = 461 * 1E-9
+    lateral_res = 0.2205 * 1E-6
+    axial_res = 0.26 * 1E-6
+    pZ = 0
+    size = FinalDimensions(image[:, :, 1, :].dimensionsAsLongArray())
+    create = ij.op().namespace(CreateNamespace)
+    psf = create.kernelDiffraction(size, na, wavelength, ri_sample, ri_immersion, lateral_res, axial_res, pZ, FloatType())
+    print("[INFO]: Deconvolving data...")
+    puncta_img = ij.op().deconvolve().richardsonLucyTV(image[:, :, 1, :], psf, 15, 0.002)
+
+    # perform gaussian subtraction
+    puncta_img_gauss = ij.op().filter().gauss(puncta_img, 9.0)
+    puncta_img_sub = puncta_img - puncta_img_gauss
 
     # run CCA
+    thres = ij.op().threshold().triangle(puncta_img_sub)
     res_puncta = ij.op().labeling().cca(thres, StructuringElement.EIGHT_CONNECTED)
 
     # filter puncta
@@ -115,9 +104,6 @@ parser.add_argument(
     "-i", "--input", required=True, help="Path to the image file."
 )
 parser.add_argument(
-    "-r", "--radius", type=int, required=True, help="Radius value as an integer."
-)
-parser.add_argument(
     "--min_size", type=int, required=True, help="Minimum size value as an integer."
 )
 parser.add_argument(
@@ -132,11 +118,14 @@ print(f"ImageJ2 version: {ij.getVersion()}")
 # import extra ImageJ2/Imglib2 resources
 Util = sj.jimport('net.imglib2.util.Util')
 Img = sj.jimport('net.imglib2.img.Img')
+FinalDimensions = sj.jimport('net.imglib2.FinalDimensions')
 Views = sj.jimport('net.imglib2.view.Views')
 StructuringElement = sj.jimport('net.imglib2.algorithm.labeling.ConnectedComponents.StructuringElement')
 ImgLabeling = sj.jimport('net.imglib2.roi.labeling.ImgLabeling')
 LabelRegions = sj.jimport('net.imglib2.roi.labeling.LabelRegions')
 Regions = sj.jimport('net.imglib2.roi.Regions')
+CreateNamespace = sj.jimport('net.imagej.ops.create.CreateNamespace')
+FloatType = sj.jimport('net.imglib2.type.numeric.real.FloatType')
 
 # load data
 img = ij.io().open(pargs.input)
@@ -144,7 +133,7 @@ xarr = ij.py.to_xarray(img)
 
 # run analysis
 nuclei_labels = segment_nuclei(img)
-puncta_labels = segment_puncta(ij.py.to_xarray(img), pargs.radius, pargs.min_size, pargs.max_size)
+puncta_labels = segment_puncta(img, pargs.min_size, pargs.max_size)
 
 # show output in napari
 viewer = napari.Viewer()
