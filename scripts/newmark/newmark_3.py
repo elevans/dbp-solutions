@@ -1,4 +1,6 @@
 #@ OpEnvironment ops
+#@ OpService ijops
+#@ ConvertService cs
 #@ IOService io
 #@ UIService ui
 #@ Img img
@@ -22,12 +24,44 @@ import os
 import subprocess
 import shutil
 
+from net.imglib2.img import Img
+from net.imglib2.algorithm.labeling.ConnectedComponents import StructuringElement
 from net.imglib2 import FinalDimensions
+from net.imglib2.roi import Regions
+from net.imglib2.roi.labeling import ImgLabeling, LabelRegions
+from net.imglib2.type.logic import BitType
 from net.imglib2.type.numeric.real import FloatType
 from net.imglib2.type.numeric.complex import ComplexFloatType
 
+from org.scijava.table import DefaultGenericTable
+
 from java.nio.file import Files
 from java.lang import Float
+
+def compute_stats(image, labeling):
+    """Compute geometry and other statics.
+    """
+    # extract regions
+    regs = LabelRegions(labeling)
+    reg_labels = regs.getExistingLabels()
+
+    # set up table headers
+    table = DefaultGenericTable(3, 0)
+    table.setColumnHeader(0, "label")
+    table.setColumnHeader(1, "size")
+    table.setColumnHeader(2, "MFI")
+
+    i = 0
+    for r in regs:
+        sample = Regions.sample(r, image)
+        table.appendRow()
+        table.set("label", i, int(r.getLabel()))
+        table.set("size", i, ijops.stats().size(sample).getRealDouble())
+        table.set("MFI", i, ijops.stats().mean(sample).getRealDouble())
+        i += 1
+
+    return table
+
 
 def deconvolve(image):
     """Perform Richardson-Lucy deconvolution.
@@ -117,16 +151,37 @@ def split_img(image, axis=2):
 
     return views
 
+def segment_nuclei(image):
+    """Segment nuclei.
+    """
+    cp_index_img = run_cellpose(image)
+
+    return cs.convert(cp_index_img, ImgLabeling)
+
+
+def segment_puncta(image):
+    """Segment puncta.
+    """
+    puncta_img = deconvolve(image)
+    puncta_img = gaussian_subtraction(puncta_img, 9.0)
+
+    thres = ops.op("create.img").input(puncta_img, BitType()).apply()
+    ops.op("threshold.triangle").input(puncta_img).output(thres).compute()
+
+    return ops.op("labeling.cca").input(thres, StructuringElement.EIGHT_CONNECTED).apply()
+
 # split channels
 chs = split_img(img)
 
 # segment nuclei
-cp_masks = run_cellpose(chs[-1])
+nuc_img_labeling = segment_nuclei(chs[-1])
 
 # segment puncta
-decon = deconvolve(chs[1])
-puncta = gaussian_subtraction(decon, 9.0)
+puncta_img_labeling = segment_puncta(chs[1])
 
 # show results
-ui.show(cp_masks)
-ui.show(puncta)
+ui.show(nuc_img_labeling.getIndexImg())
+ui.show(puncta_img_labeling.getIndexImg())
+
+# show table
+p_table = compute_stats(chs[1], puncta_img_labeling)
