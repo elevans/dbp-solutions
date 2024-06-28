@@ -173,10 +173,10 @@ def process_batch(image_paths):
     # create table with headers
     table = DefaultGenericTable(7, 0)
     table.setColumnHeader(0, "name")
-    table.setColumnHeader(1, "p16_roi_area")
+    table.setColumnHeader(1, "p16_roi_size")
     table.setColumnHeader(2, "p16_roi_mfi")
     table.setColumnHeader(3, "p16_threshold_value")
-    table.setColumnHeader(4, "MUC4_area_in_p16_roi")
+    table.setColumnHeader(4, "MUC4_size_in_p16_roi")
     table.setColumnHeader(5, "MUC4_mfi_in_p16_roi")
     table.setColumnHeader(6, "MUC4_threshold_value")
 
@@ -195,10 +195,10 @@ def process_batch(image_paths):
         # compute stats and write to table
         table.appendRow()
         table.set("name", i, names[i])
-        table.set("p16_roi_area", i, ijops.stats().size(sample_a).getRealDouble())
+        table.set("p16_roi_size", i, ijops.stats().size(sample_a).getRealDouble())
         table.set("p16_roi_mfi", i, ijops.stats().mean(sample_a).getRealDouble())
         table.set("p16_threshold_value", i, thres_a)
-        table.set("MUC4_area_in_p16_roi", i, count_pixels(sample_ab_m))
+        table.set("MUC4_size_in_p16_roi", i, count_pixels(sample_ab_m))
         table.set("MUC4_mfi_in_p16_roi", i, ijops.stats().mean(sample_ab).getRealDouble())
         table.set("MUC4_threshold_value", i, thres_b)
 
