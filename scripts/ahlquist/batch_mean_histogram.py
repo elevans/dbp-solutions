@@ -32,13 +32,29 @@ def create_mask_stack(images, masks):
     return
 
 
+def count_pixels(sample):
+    """Count the number of > 0 pixels in an ImgLib2 sample.
+    """
+    # get the cursor
+    c = sample.cursor()
+    p = 0
+    while c.hasNext():
+        c.fwd()
+        if c.get().getRealDouble() > 0:
+            p += 1
+        else:
+            continue
+
+    return float(p)
+
+
 def extract_channel(image, ch):
     """Extract a given channel as a view.
     """
-    print("[INFO]: Extracting channel {}".format(ch))
     dims = image.dimensionsAsLongArray()
     min_interval = array([0, 0, ch -1], "l")
     max_interval = array([dims[0] - 1, dims[1] - 1, ch - 1], "l")
+
     return ops.op("transform.intervalView").input(image, min_interval, max_interval).apply()
 
 
@@ -122,6 +138,7 @@ def process_batch(image_paths):
     # extract channels
     imgs_a = []
     imgs_b = []
+    print("[INFO]: Extracting channels...")
     for im in imgs:
         imgs_a.append(extract_channel(im, ch_a))
         imgs_b.append(extract_channel(im, ch_b))
@@ -146,6 +163,7 @@ def process_batch(image_paths):
         masks_b.append(m_b)
 
     # create ImgLabelings
+    print("[INFO]: Creating labels...")
     labelings_a = []
     labelings_b = []
     for i in range(count):
@@ -155,41 +173,39 @@ def process_batch(image_paths):
     # create table with headers
     table = DefaultGenericTable(7, 0)
     table.setColumnHeader(0, "name")
-    table.setColumnHeader(1, "p16_area")
-    table.setColumnHeader(2, "p16_mfi")
-    table.setColumnHeader(3, "p16_thres_value")
-    table.setColumnHeader(4, "MUC4_area")
-    table.setColumnHeader(5, "MUC4_mfi")
-    table.setColumnHeader(6, "MUC4_thres_value")
+    table.setColumnHeader(1, "p16_roi_area")
+    table.setColumnHeader(2, "p16_roi_mfi")
+    table.setColumnHeader(3, "p16_threshold_value")
+    table.setColumnHeader(4, "MUC4_area_in_p16_roi")
+    table.setColumnHeader(5, "MUC4_mfi_in_p16_roi")
+    table.setColumnHeader(6, "MUC4_threshold_value")
 
     for i in range(count):
         # extract label regions
         regs_a = LabelRegions(labelings_a[i])
-        regs_b = LabelRegions(labelings_b[i])
 
         # extract region -- only one label should be in the labeling
         r_a = regs_a.getLabelRegion(1)
-        r_b = regs_b.getLabelRegion(1)
 
         # create samples
-        sample_a = Regions.sample(r_a, imgs_a[i])
-        sample_b = Regions.sample(r_b, imgs_b[i])
+        sample_a = Regions.sample(r_a, imgs_a[i]) # p16 label w/ p16 channel
+        sample_ab = Regions.sample(r_a, imgs_b[i]) # p16 label w/ MUC4 channel
+        sample_ab_m = Regions.sample(r_a, labelings_b[i].getIndexImg()) # p16 label w/ MUC4 mask
 
         # compute stats and write to table
         table.appendRow()
         table.set("name", i, names[i])
-        table.set("p16_area", i, ijops.stats().size(sample_a).getRealDouble())
-        table.set("p16_mfi", i, ijops.stats().mean(sample_a).getRealDouble())
-        table.set("p16_thres_value", i, thres_a)
-        table.set("MUC4_area", i, ijops.stats().size(sample_b).getRealDouble())
-        table.set("MUC4_mfi", i, ijops.stats().mean(sample_b).getRealDouble())
-        table.set("MUC4_thres_value", i, thres_b)
+        table.set("p16_roi_area", i, ijops.stats().size(sample_a).getRealDouble())
+        table.set("p16_roi_mfi", i, ijops.stats().mean(sample_a).getRealDouble())
+        table.set("p16_threshold_value", i, thres_a)
+        table.set("MUC4_area_in_p16_roi", i, count_pixels(sample_ab_m))
+        table.set("MUC4_mfi_in_p16_roi", i, ijops.stats().mean(sample_ab).getRealDouble())
+        table.set("MUC4_threshold_value", i, thres_b)
 
     # TODO: save hyper stacks w/ masks
     return table
 
-# load batch images
+# run image analysis
 img_paths = get_file_paths(in_dir, ext)
-
-# debug stuff
-x = process_batch(img_paths)
+result_table = process_batch(img_paths)
+ui.show(result_table)
