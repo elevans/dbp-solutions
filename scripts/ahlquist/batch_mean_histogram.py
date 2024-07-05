@@ -1,5 +1,6 @@
 #@ OpEnvironment ops
 #@ OpService ijops
+#@ IOService io
 #@ DatasetIOService ds
 #@ ConvertService cs
 #@ UIService ui
@@ -16,20 +17,47 @@ from net.imglib2.img.array import ArrayImgs
 from net.imglib2.type.logic import BitType
 from net.imglib2.roi import Regions
 from net.imglib2.roi.labeling import ImgLabeling, LabelRegions
+from net.imglib2.view import Views
 
 from org.scijava.table import DefaultGenericTable
 
 from java.lang import Short
+from java.lang import Long
 from jarray import array
 
-def create_mask_stack(images, masks):
-    # get list of input images
-    # get list of masks (channel a, b)
-    # convert masks to 16-bit (i.e. input type)
-    # optional: multiply by 257 to max out mask value
-    # stack view
-    # return stack view
-    return
+def create_mask_stack(images, labelings_arr):
+    """Save masks as a stack by appending to the channel axis.
+    """
+    count = len(images)
+    stacks = []
+    for i in range(count):
+        st = [images[i]] # the base/input image
+        for ch in labelings_arr:
+            # duplicate index image and conver to 16-bit
+            msk = ops.op("copy.img").input(ch[i].getIndexImg()).apply()
+            msk = ops.op("convert.uint16").input(msk).apply()
+            # create a sample and only set those pixels to max
+            regs = LabelRegions(ch[i])
+            r = regs.getLabelRegion(1) # there is only one region
+            smp = Regions.sample(r, msk)
+            # set the pixels within the sample to 65535
+            set_max_pixel_value(smp)
+            st.append(msk)
+
+        # concatenate view along the same axis
+        stacks.append(Views.concatenate(2, st))
+
+    return stacks
+
+
+def set_max_pixel_value(sample):
+    """Set the maximum pixel value to 65535 for uint16.
+    """
+    # get the cursor
+    c = sample.cursor()
+    while c.hasNext():
+        c.fwd()
+        c.get().set(65535)
 
 
 def count_pixels(sample):
@@ -202,7 +230,13 @@ def process_batch(image_paths):
         table.set("MUC4_mfi_in_p16_roi", i, ijops.stats().mean(sample_ab).getRealDouble())
         table.set("MUC4_threshold_value", i, thres_b)
 
-    # TODO: save hyper stacks w/ masks
+    if save:
+        print("[INFO]: Creating mask stacks...")
+        stacks = create_mask_stack(imgs, (labelings_a, labelings_b))
+        for i in range(len(stacks)):
+            print("[INFO]: Saving image {}_mask_stack.tif...".format(names[i]))
+            io.save(stacks[i], os.path.join(in_dir.toString(), "{}_mask_stack.tif".format(names[i])))
+
     return table
 
 # run image analysis
