@@ -7,13 +7,18 @@
 #@ File (label = "Input directory", style="directory") in_dir
 #@ String (label = "File extension", value=".tif") ext
 #@ String (choices={"otsu", "huang", "moments", "renyiEntropy", "triangle", "yen"}, style="listBox") thres_method
-#@ Integer (label = "p16 Channel", value=1) ch_a
-#@ Integer (label = "MUC4 Channel", value=2) ch_b
+#@ String (visibility=MESSAGE, value="<b>Channel configuration</b>", required=false) ch_msg
+#@ String (label = "Reference channel name", value="p16") ch_a_name
+#@ Integer (label = "Reference channel number", value=1) ch_a
+#@ String (label = "Comparison channel name", value="MUC4") ch_b_name
+#@ Integer (label = "Comparison channel number", value=2) ch_b
 #@ Boolean (label = "Create stack with masks", value=False) save
 
 import os
 
+from net.imglib2 import FinalDimensions
 from net.imglib2.img.array import ArrayImgs
+from net.imglib2.type.numeric.integer import UnsignedShortType
 from net.imglib2.type.logic import BitType
 from net.imglib2.roi import Regions
 from net.imglib2.roi.labeling import ImgLabeling, LabelRegions
@@ -26,7 +31,23 @@ from java.lang import Long
 from jarray import array
 
 def create_mask_stack(images, labelings_arr):
-    """Save masks as a stack by appending to the channel axis.
+    """Create a new stack with the mask as a channel.
+
+    Creates a list of stacks where the input images are
+    concatenated with their respective masks (set to
+    65,535 pixel value).
+
+    :param images:
+
+        A list of Imgs.
+
+    :param labelings_arr:
+
+        A list of ImgLabelings.
+
+    :return:
+
+        A list of Imgs with masks added as a channel.
     """
     count = len(images)
     stacks = []
@@ -51,7 +72,14 @@ def create_mask_stack(images, labelings_arr):
 
 
 def set_max_pixel_value(sample):
-    """Set the maximum pixel value to 65535 for uint16.
+    """Set the maximum pixel value for uint16.
+
+    Set all pixels within the given sample to the max
+    value of the 16-bit unsigned data range (65,535).
+
+    :param sample:
+
+        An ImgLib2 SamplingInterableInterval
     """
     # get the cursor
     c = sample.cursor()
@@ -62,6 +90,17 @@ def set_max_pixel_value(sample):
 
 def count_pixels(sample):
     """Count the number of > 0 pixels in an ImgLib2 sample.
+
+    Count the number of pixels that have a value greater than
+    0.
+
+    :param sample:
+
+        An ImgLib2 SamplingIterableInterval.
+
+    :return:
+
+        The number of greater than 0 pixels as an integer.
     """
     # get the cursor
     c = sample.cursor()
@@ -73,21 +112,52 @@ def count_pixels(sample):
         else:
             continue
 
-    return float(p)
+    return p
 
 
 def extract_channel(image, ch):
     """Extract a given channel as a view.
+
+    Extract the given channel from the input image.
+    Note that this function creates a copy of the data.
+
+    :param image:
+
+        Input Img.
+
+    :param ch:
+
+        Channel number to extract.
+
+    :return: An ArrayImg with the channel data.
     """
+    # create view for the given channel
     dims = image.dimensionsAsLongArray()
     min_interval = array([0, 0, ch -1], "l")
     max_interval = array([dims[0] - 1, dims[1] - 1, ch - 1], "l")
+    view = ops.op("transform.intervalView").input(image, min_interval, max_interval).apply()
 
-    return ops.op("transform.intervalView").input(image, min_interval, max_interval).apply()
+    # copy view into an ArrayImg
+    out = ops.op("create.img").input(
+            FinalDimensions(view.dimensionsAsLongArray()),
+            UnsignedShortType()
+            ).apply()
+    ops.op("copy.img").input(view).output(out).compute()
 
+    return out
 
 def extract_file_names(paths):
     """Extract file names from a list of paths.
+
+    Extract the file names from a list of file paths.
+
+    :param paths:
+
+        A list of file paths.
+
+    :return:
+
+        A list of file names.
     """
     names = []
     for p in paths:
@@ -98,7 +168,22 @@ def extract_file_names(paths):
 
 
 def get_file_paths(base_dir, ext):
-    """Get all file paths as in a given directory.
+    """Get all file paths in a given directory.
+
+    Get all file paths in the provided directory with
+    the given extension.
+
+    :param base_dir:
+
+        The base directory to search in.
+
+    :param ext:
+
+        The extension for considered files (e.g. ".tif")
+
+    :return:
+
+        A list of file paths.
     """
     paths = []
     abs_dir = base_dir.getAbsolutePath()
@@ -114,7 +199,17 @@ def get_file_paths(base_dir, ext):
 
 
 def load_images(paths):
-    """Load images.
+    """Load images from a list of file paths.
+
+    Load images from a list of file paths as Imgs.
+
+    :param paths:
+
+        A list of file paths.
+
+    :return:
+
+        A list of Imgs.
     """
     images = []
     for p in paths:
@@ -125,21 +220,47 @@ def load_images(paths):
 
 
 def mean(vals):
-    """Compute the mean of a list of numbers.
+    """Compute the mean of a list of values.
+
+    Compute the mean from a list/sequence of values (e.g. integers).
+
+    :param vals:
+
+        A list of values (e.g. integers/floats)
+
+    :return:
+
+        The mean as a float.
     """
     return sum(vals) / float(len(vals))
 
 
 def mean_histogram(images, bins=65536):
     """Compute the mean histogram of a list of images.
+
+    Compute the mean histogram from a list of images by extracting
+    the histograms from each image in the list and averaging them.
+    The produced mean histogram is then converted into an ImgLib2
+    Histogram1d type.
+
+    :param images:
+
+        A list of Imgs.
+
+    :param bins:
+
+        The number of histogram bins. Typically the bit depth of the
+        input image (e.g. 16-bit/65,536).
+
+    :return:
+
+        An ImgLib2 Histogram1d.
     """
-    print("[INFO]: Calculating individual histograms...")
     hists = []
     # get individual image histograms
     for img in images:
         hists.append(ops.op("image.histogram").input(img, bins).apply().toLongArray())
 
-    print("[INFO]: Calculating mean histogram...")
     mean_hist = []
     temp = []
     for b in range(bins):
@@ -157,6 +278,16 @@ def mean_histogram(images, bins=65536):
 
 def process_batch(image_paths):
     """Process the batch of images.
+
+    Process the batch of images and populate a results table.
+
+    :param image_paths:
+
+        A path of image files.
+
+    :return:
+
+        A SciJava results table.
     """
     # load images
     imgs = load_images(image_paths)
@@ -172,6 +303,7 @@ def process_batch(image_paths):
         imgs_b.append(extract_channel(im, ch_b))
 
     # create mean histograms
+    print("[INFO]: Computing mean histogram...")
     mean_hist_a = mean_histogram(imgs_a)
     mean_hist_b = mean_histogram(imgs_b)
 
@@ -201,12 +333,12 @@ def process_batch(image_paths):
     # create table with headers
     table = DefaultGenericTable(7, 0)
     table.setColumnHeader(0, "name")
-    table.setColumnHeader(1, "p16_roi_size")
-    table.setColumnHeader(2, "p16_roi_mfi")
-    table.setColumnHeader(3, "p16_threshold_value")
-    table.setColumnHeader(4, "MUC4_size_in_p16_roi")
-    table.setColumnHeader(5, "MUC4_mfi_in_p16_roi")
-    table.setColumnHeader(6, "MUC4_threshold_value")
+    table.setColumnHeader(1, "{}_roi_size".format(ch_a_name))
+    table.setColumnHeader(2, "{}_roi_mfi".format(ch_a_name))
+    table.setColumnHeader(3, "{}_threshold_value".format(ch_a_name))
+    table.setColumnHeader(4, "{}_size_in_p16_roi".format(ch_b_name))
+    table.setColumnHeader(5, "{}_mfi_in_p16_roi".format(ch_b_name))
+    table.setColumnHeader(6, "{}_threshold_value".format(ch_b_name))
 
     for i in range(count):
         # extract label regions
@@ -223,12 +355,12 @@ def process_batch(image_paths):
         # compute stats and write to table
         table.appendRow()
         table.set("name", i, names[i])
-        table.set("p16_roi_size", i, ijops.stats().size(sample_a).getRealDouble())
-        table.set("p16_roi_mfi", i, ijops.stats().mean(sample_a).getRealDouble())
-        table.set("p16_threshold_value", i, thres_a)
-        table.set("MUC4_size_in_p16_roi", i, count_pixels(sample_ab_m))
-        table.set("MUC4_mfi_in_p16_roi", i, ijops.stats().mean(sample_ab).getRealDouble())
-        table.set("MUC4_threshold_value", i, thres_b)
+        table.set("{}_roi_size".format(ch_a_name), i, ops.op("stats.size").input(sample_a).apply())
+        table.set("{}_roi_mfi".format(ch_a_name), i, ijops.stats().mean(sample_a).getRealDouble())
+        table.set("{}_threshold_value".format(ch_a_name), i, thres_a)
+        table.set("{}_size_in_p16_roi".format(ch_b_name), i, count_pixels(sample_ab_m))
+        table.set("{}_mfi_in_p16_roi".format(ch_b_name), i, ijops.stats().mean(sample_ab).getRealDouble())
+        table.set("{}_threshold_value".format(ch_b_name), i, thres_b)
 
     if save:
         print("[INFO]: Creating mask stacks...")
