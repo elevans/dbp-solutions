@@ -7,6 +7,7 @@
 #@ String (visibility=MESSAGE, value="<b>Channel settings</b>", required=false) ch_msg
 #@ Integer (label = "Nuclear channel position", value=1) ch_nuc
 #@ Integer (label = "Puncta channel position", value=2) ch_pun
+#@ Integer (label = "Nuclear marker channel position", value=3) ch_mrk
 #@ String (visibility=MESSAGE, value="<b>Cellpose settings</b>", required=false) cp_msg
 #@ String (label="Cellpose Python path:") cp_py_path 
 #@ String (label="Pretrained model:", choices={"cyto", "cyto2", "nuclei"}, style="listBox") model
@@ -226,15 +227,15 @@ def segment_puncta(image):
 # split channels
 chs = split_img(img)
 
-# segment nuclei
+# segment data
 nuc_img_labeling = segment_nuclei(chs[ch_nuc - 1])
-
-# segment puncta
-puncta_img_labeling = segment_puncta(chs[ch_pun - 1])
+pun_img_labeling = segment_puncta(chs[ch_pun - 1])
+mrk_img_labeling = segment_puncta(chs[ch_mrk -1])
 
 # show results
 ui.show(nuc_img_labeling.getIndexImg())
-ui.show(puncta_img_labeling.getIndexImg())
+ui.show(pun_img_labeling.getIndexImg())
+ui.show(mrk_img_labeling.getIndexImg())
 
 # show table
 p_table = compute_stats(chs[1], puncta_img_labeling)
