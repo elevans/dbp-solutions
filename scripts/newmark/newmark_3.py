@@ -39,7 +39,21 @@ from java.nio.file import Files
 from java.lang import Float
 
 def compute_stats(image, labeling):
-    """Compute geometry and other statics.
+    """Compute geometry and other statistics.
+
+    Compute and populate a table with object geometry and statistics.
+
+    :param image:
+
+        Input Img.
+
+    :param labeling:
+
+        An ImgLabeling.
+
+    :return:
+
+        A SciJava Table.
     """
     # extract regions
     regs = LabelRegions(labeling)
@@ -64,7 +78,18 @@ def compute_stats(image, labeling):
 
 
 def deconvolve(image):
-    """Perform Richardson-Lucy deconvolution.
+    """Perform Richardson-Lucy TV deconvolution.
+
+    Perform Richardson-Lucy Total Variation (TV) deconvolution
+    on the input data.
+
+    :param image:
+
+        Input Img.
+
+    :return:
+
+        Deconvolved Img.
     """
     # convert parameters to meters
     wavelength = wvlen * 1E-9
@@ -102,6 +127,21 @@ def deconvolve(image):
 
 def gaussian_subtraction(image, sigma):
     """Perform a Gaussian subraction.
+
+    Apply a Gaussian blur on the input image at the given
+    sigma value and subtract it from the input.
+
+    :param image:
+
+        Input Img.
+
+    :param sigma:
+
+        Gaussian blur sigma value.
+
+    :return:
+
+        Gaussian blur subtracted Img.
     """
     gauss = ops.op("filter.gauss").input(image, sigma).apply()
     
@@ -113,6 +153,16 @@ def gaussian_subtraction(image, sigma):
 
 def run_cellpose(image):
     """Execute Cellpose via a conda environment.
+
+    Run cellpose with the given settings via a conda environment.
+
+    :param image:
+
+        Input Img.
+
+    :return:
+
+        Cellpose output.
     """
     # create a temp directory
     tmp_dir = Files.createTempDirectory("fiji_tmp")
@@ -185,3 +235,4 @@ ui.show(puncta_img_labeling.getIndexImg())
 
 # show table
 p_table = compute_stats(chs[1], puncta_img_labeling)
+ui.show(p_table)
