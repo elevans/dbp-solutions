@@ -4,6 +4,9 @@
 #@ IOService io
 #@ UIService ui
 #@ Img img
+#@ String (visibility=MESSAGE, value="<b>Channel settings</b>", required=false) ch_msg
+#@ Integer (label = "Nuclear channel position", value=1) ch_nuc
+#@ Integer (label = "Puncta channel position", value=2) ch_pun
 #@ String (visibility=MESSAGE, value="<b>Cellpose settings</b>", required=false) cp_msg
 #@ String (label="Cellpose Python path:") cp_py_path 
 #@ String (label="Pretrained model:", choices={"cyto", "cyto2", "nuclei"}, style="listBox") model
@@ -224,10 +227,10 @@ def segment_puncta(image):
 chs = split_img(img)
 
 # segment nuclei
-nuc_img_labeling = segment_nuclei(chs[-1])
+nuc_img_labeling = segment_nuclei(chs[ch_nuc - 1])
 
 # segment puncta
-puncta_img_labeling = segment_puncta(chs[1])
+puncta_img_labeling = segment_puncta(chs[ch_pun - 1])
 
 # show results
 ui.show(nuc_img_labeling.getIndexImg())
