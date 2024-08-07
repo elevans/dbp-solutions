@@ -5,9 +5,9 @@
 #@ UIService ui
 #@ Img img
 #@ String (visibility=MESSAGE, value="<b>Channel settings</b>", required=false) ch_msg
-#@ Integer (label = "Nuclear channel position", value=1) ch_nuc
-#@ Integer (label = "Puncta channel position", value=2) ch_pun
-#@ Integer (label = "Nuclear marker channel position", value=3) ch_mrk
+#@ Integer (label = "Nuclear channel position", min = 1, value = 1) ch_nuc
+#@ Integer (label = "Puncta channel position", min = 1, value = 2) ch_pun
+#@ Integer (label = "Nuclear marker channel position", min = 1, value = 3) ch_mrk
 #@ String (visibility=MESSAGE, value="<b>Cellpose settings</b>", required=false) cp_msg
 #@ String (label="Cellpose Python path:") cp_py_path 
 #@ String (label="Pretrained model:", choices={"cyto", "cyto2", "nuclei"}, style="listBox") model
@@ -42,10 +42,38 @@ from org.scijava.table import DefaultGenericTable
 from java.nio.file import Files
 from java.lang import Float
 
-def compute_stats(image, labeling):
-    """Compute geometry and other statistics.
+def check_for_null_mask(sample):
+    """Check if a mask sample is null.
 
-    Compute and populate a table with object geometry and statistics.
+    Check if all the pixels within the given sample
+    equal 0.
+
+    :param sample:
+
+        A labeling sample.
+
+    :return:
+
+        Boolean indicating whether all pixels within the
+        given sample equal 0.
+    """
+    c = sample.cursor()
+    px_vals = []
+    while c.hasNext():
+        c.fwd()
+        px_vals.append(c.get().getInteger())
+    px_vals = list(set(px_vals))
+    if len(px_vals) == 1 and px_vals[0] == 0:
+        # all pixels are zero in sample
+        return True
+    else:
+        return False
+
+
+def compute_puncta_stats(image, labeling):
+    """Compute puncta geometry and other statistics.
+
+    Compute and populate a table with puncta geometry and statistics.
 
     :param image:
 
@@ -66,7 +94,7 @@ def compute_stats(image, labeling):
     # set up table headers
     table = DefaultGenericTable(3, 0)
     table.setColumnHeader(0, "label")
-    table.setColumnHeader(1, "size")
+    table.setColumnHeader(1, "size (pixels)")
     table.setColumnHeader(2, "MFI")
 
     i = 0
@@ -74,11 +102,90 @@ def compute_stats(image, labeling):
         sample = Regions.sample(r, image)
         table.appendRow()
         table.set("label", i, int(r.getLabel()))
-        table.set("size", i, ijops.stats().size(sample).getRealDouble())
+        table.set("size (pixels)", i, ijops.stats().size(sample).getRealDouble())
         table.set("MFI", i, ijops.stats().mean(sample).getRealDouble())
         i += 1
 
     return table
+
+
+def compute_nuclear_stats(n_labeling, m_labeling, p_labeling):
+    """Compute nuclear geometry and other statistics.
+
+    Compute and populate a table with puncta geometry and statistics.
+
+    :param n_labeling:
+
+        Input nuclear ImgLabeling.
+
+    :param m_labeling:
+
+        Input marker ImgLabeling.
+
+    :param p_labeling:
+
+        Input puncta ImgLabeling.
+
+    :return:
+
+        A SciJava Table.
+    """
+    # extract nuclear regions
+    n_regs = LabelRegions(n_labeling)
+    n_regs_labels = n_regs.getExistingLabels()
+
+    # set up table column headers
+    table = DefaultGenericTable(4, 0)
+    table.setColumnHeader(0, "label")
+    table.setColumnHeader(1, "size (pixels)")
+    table.setColumnHeader(2, "marker status")
+    table.setColumnHeader(3, "number of puncta")
+
+    i = 0
+    m_idx_img = m_labeling.getIndexImg()
+    p_idx_img = p_labeling.getIndexImg()
+    for r in n_regs:
+        ms = Regions.sample(r, m_idx_img)
+        ps = Regions.sample(r, p_idx_img)
+        table.appendRow()
+        table.set("label", i , int(r.getLabel()))
+        table.set("size (pixels)", i, ops.op("stats.size").input(ps).apply())
+        mrk_status = check_for_null_mask(ms)
+        if mrk_status is True:
+            table.set("marker status", i, 1)
+        else:
+            table.set("marker status", i, 0)
+        table.set("number of puncta", i, count_sample_labels(ps))
+        i += 1
+
+    return table
+
+
+def count_sample_labels(sample):
+    """Count the number of unique labels within a sample.
+
+    Count the number of unique labels with a cursor within the
+    given sample.
+
+    :param sample:
+
+        A labeling sample.
+
+    :return:
+
+        Number of unique labels within the given sample.
+    """
+    c = sample.cursor()
+    out = []
+    while c.hasNext():
+        c.fwd()
+        v = c.get().getInteger()
+        if v != 0 and v not in out:
+            out.append(v)
+        else:
+            continue
+
+    return len(set(out))
 
 
 def deconvolve(image):
@@ -198,6 +305,20 @@ def run_cellpose(image):
 
 def split_img(image, axis=2):
     """Create views along a given axis.
+
+    Create a view of the given image along a given axis.
+
+    :param image:
+
+        Input Img.
+
+    :param axis:
+
+        Axis to split along.
+
+    :return:
+
+        View of the input Img split along the given axis.
     """
     views = []
     for i in range(image.dimensionsAsLongArray()[axis]):
@@ -205,38 +326,70 @@ def split_img(image, axis=2):
 
     return views
 
-def segment_nuclei(image):
-    """Segment nuclei.
+
+def run_cellpose_labeling(image):
+    """Run cellpose and convert to ImgLabeling.
+
+    Run cellpose and return an ImgLabeling.
+
+    :param image:
+
+        Input Img.
+
+    :return:
+
+        Output cellpose ImgLabeling.
     """
     cp_index_img = run_cellpose(image)
 
     return cs.convert(cp_index_img, ImgLabeling)
 
 
-def segment_puncta(image):
-    """Segment puncta.
+def run_puncta_labeling(image):
+    """Run puncta image processing steps.
+
+    Run the puncta image processing steps and return
+    an ImgLabeling.
+
+    :param image:
+
+        Input Img.
+
+    :return:
+
+        Output puncta ImgLabeling.
     """
+    print("[INFO]: Deconvolving image...")
     puncta_img = deconvolve(image)
+    print("[INFO]: Applying Gaussian Subtraction...")
     puncta_img = gaussian_subtraction(puncta_img, 9.0)
 
+    print("[INFO]: Creating image labeling...")
     thres = ops.op("create.img").input(puncta_img, BitType()).apply()
     ops.op("threshold.triangle").input(puncta_img).output(thres).compute()
 
     return ops.op("labeling.cca").input(thres, StructuringElement.EIGHT_CONNECTED).apply()
 
+
+# TODO:
+# Wants
+# - Link to the ROI manager (link table to image)
+
 # split channels
 chs = split_img(img)
 
 # segment data
-nuc_img_labeling = segment_nuclei(chs[ch_nuc - 1])
-pun_img_labeling = segment_puncta(chs[ch_pun - 1])
-mrk_img_labeling = segment_puncta(chs[ch_mrk -1])
+nuc_img_labeling = run_cellpose_labeling(chs[ch_nuc - 1])
+mrk_img_labeling = run_cellpose_labeling(chs[ch_mrk - 1])
+pun_img_labeling = run_puncta_labeling(chs[ch_pun - 1])
 
 # show results
-ui.show(nuc_img_labeling.getIndexImg())
-ui.show(pun_img_labeling.getIndexImg())
-ui.show(mrk_img_labeling.getIndexImg())
+ui.show("nuclear labeling", nuc_img_labeling.getIndexImg())
+ui.show("puncta labeling", pun_img_labeling.getIndexImg())
+ui.show("nuclear marker labeling", mrk_img_labeling.getIndexImg())
 
 # show table
-p_table = compute_stats(chs[1], puncta_img_labeling)
-ui.show(p_table)
+n_table = compute_nuclear_stats(nuc_img_labeling, mrk_img_labeling, pun_img_labeling)
+p_table = compute_puncta_stats(chs[1], pun_img_labeling)
+ui.show("nuclear results table", n_table)
+ui.show("puncta results table", p_table)
