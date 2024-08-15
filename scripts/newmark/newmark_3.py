@@ -65,9 +65,9 @@ def check_for_null_mask(sample):
     px_vals = list(set(px_vals))
     if len(px_vals) == 1 and px_vals[0] == 0:
         # all pixels are zero in sample
-        return True
-    else:
         return False
+    else:
+        return True
 
 
 def compute_puncta_stats(image, labeling):
@@ -374,6 +374,10 @@ def run_puncta_labeling(image):
 # TODO:
 # Wants
 # - Link to the ROI manager (link table to image)
+# - Better seperate the puncta in Z axis
+# - Investigate OSError on macOS analysis computer
+
+# brightest pixel reduction
 
 # split channels
 chs = split_img(img)
