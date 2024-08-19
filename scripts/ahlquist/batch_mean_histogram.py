@@ -9,9 +9,9 @@
 #@ String (choices={"otsu", "huang", "moments", "renyiEntropy", "triangle", "yen"}, style="listBox") thres_method
 #@ String (visibility=MESSAGE, value="<b>Channel configuration</b>", required=false) ch_msg
 #@ String (label = "Reference channel name", value="p16") ch_a_name
-#@ Integer (label = "Reference channel number", value=1) ch_a
+#@ Integer (label = "Reference channel number", min = 1, value=1) ch_a
 #@ String (label = "Comparison channel name", value="MUC4") ch_b_name
-#@ Integer (label = "Comparison channel number", value=2) ch_b
+#@ Integer (label = "Comparison channel number", min = 1, value=2) ch_b
 #@ Boolean (label = "Create stack with masks", value=False) save
 
 import os
