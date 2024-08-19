@@ -131,20 +131,8 @@ def extract_channel(image, ch):
 
     :return: An ArrayImg with the channel data.
     """
-    # create view for the given channel
-    dims = image.dimensionsAsLongArray()
-    min_interval = array([0, 0, ch -1], "l")
-    max_interval = array([dims[0] - 1, dims[1] - 1, ch - 1], "l")
-    view = ops.op("transform.intervalView").input(image, min_interval, max_interval).apply()
+    return ops.op("transform.hyperSliceView").input(image, 2, ch - 1).apply()
 
-    # copy view into an ArrayImg
-    out = ops.op("create.img").input(
-            FinalDimensions(view.dimensionsAsLongArray()),
-            UnsignedShortType()
-            ).apply()
-    ops.op("copy.img").input(view).output(out).compute()
-
-    return out
 
 def extract_file_names(paths):
     """Extract file names from a list of paths.
