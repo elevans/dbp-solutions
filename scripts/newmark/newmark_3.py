@@ -109,7 +109,7 @@ def compute_puncta_stats(image, labeling):
     return table
 
 
-def compute_nuclear_stats(n_labeling, m_labeling, p_labeling):
+def compute_nuclear_stats(images, n_labeling, m_labeling, p_labeling):
     """Compute nuclear geometry and other statistics.
 
     Compute and populate a table with puncta geometry and statistics.
@@ -138,23 +138,25 @@ def compute_nuclear_stats(n_labeling, m_labeling, p_labeling):
     table = DefaultGenericTable(4, 0)
     table.setColumnHeader(0, "label")
     table.setColumnHeader(1, "size (pixels)")
-    table.setColumnHeader(2, "marker status")
+    table.setColumnHeader(2, "nuclear marker MFI")
     table.setColumnHeader(3, "number of puncta")
 
-    i = 0
     m_idx_img = m_labeling.getIndexImg()
     p_idx_img = p_labeling.getIndexImg()
+    i = 0
     for r in n_regs:
         ms = Regions.sample(r, m_idx_img)
         ps = Regions.sample(r, p_idx_img)
+        mrk_s = Regions.sample(r, images[ch_mrk - 1])
         table.appendRow()
         table.set("label", i , int(r.getLabel()))
         table.set("size (pixels)", i, ops.op("stats.size").input(ps).apply())
-        mrk_status = check_for_null_mask(ms)
-        if mrk_status is True:
-            table.set("marker status", i, 1)
-        else:
-            table.set("marker status", i, 0)
+        table.set("nuclear marker MFI", i, ijops.stats().mean(mrk_s).getRealDouble())
+        #mrk_status = check_for_null_mask(ms)
+        #if mrk_status is True:
+        #    table.set("marker status", i, 1)
+        #else:
+        #    table.set("marker status", i, 0)
         table.set("number of puncta", i, count_sample_labels(ps))
         i += 1
 
@@ -383,8 +385,11 @@ def run_puncta_labeling(image):
 chs = split_img(img)
 
 # segment data
+print("[INFO]: Running Cellpose on nuclei...")
 nuc_img_labeling = run_cellpose_labeling(chs[ch_nuc - 1])
+print("[INFO]: Running Cellpose on nuclear marker...")
 mrk_img_labeling = run_cellpose_labeling(chs[ch_mrk - 1])
+print("[INFO]: Running puncta segmentation...")
 pun_img_labeling = run_puncta_labeling(chs[ch_pun - 1])
 
 # show results
@@ -393,7 +398,9 @@ ui.show("puncta labeling", pun_img_labeling.getIndexImg())
 ui.show("nuclear marker labeling", mrk_img_labeling.getIndexImg())
 
 # show table
-n_table = compute_nuclear_stats(nuc_img_labeling, mrk_img_labeling, pun_img_labeling)
+print("[INFO]: Computing nuclear stats...")
+n_table = compute_nuclear_stats(chs, nuc_img_labeling, mrk_img_labeling, pun_img_labeling)
+print("[INFO]: Computing puncta stats...")
 p_table = compute_puncta_stats(chs[1], pun_img_labeling)
 ui.show("nuclear results table", n_table)
 ui.show("puncta results table", p_table)
