@@ -22,7 +22,7 @@ from net.imglib2.type.numeric.integer import UnsignedShortType
 from net.imglib2.type.logic import BitType
 from net.imglib2.roi import Regions
 from net.imglib2.roi.labeling import ImgLabeling, LabelRegions
-from net.imglib2.view import Views
+from net.imglib2.view import StackView, Views
 
 from org.scijava.table import DefaultGenericTable
 
@@ -66,7 +66,7 @@ def create_mask_stack(images, labelings_arr):
             st.append(msk)
 
         # concatenate view along the same axis
-        stacks.append(Views.concatenate(2, st))
+        stacks.append(Views.concatenate(2, StackView(st)))
 
     return stacks
 
@@ -301,44 +301,58 @@ def process_batch(image_paths):
     thres_b = ops.op("threshold.otsu").input(mean_hist_b).apply()
     masks_a = []
     masks_b = []
+    masks_xor = []
     print("[INFO]: Applying thresholds...")
     for i in range(count):
         m_a = ops.op("create.img").input(imgs_a[i], BitType()).apply()
         m_b = ops.op("create.img").input(imgs_b[i], BitType()).apply()
+        m_x = ops.op("create.img").input(imgs_a[i], BitType()).apply()
         ops.op("threshold.apply").input(imgs_a[i], thres_a).output(m_a).compute()
         ops.op("threshold.apply").input(imgs_b[i], thres_b).output(m_b).compute()
+        ops.op("logic.xor").input(m_a, m_b).output(m_x).compute()
         masks_a.append(m_a)
         masks_b.append(m_b)
+        masks_xor.append(m_x)
 
     # create ImgLabelings
     print("[INFO]: Creating labels...")
     labelings_a = []
     labelings_b = []
+    labelings_xor = []
     for i in range(count):
         labelings_a.append(cs.convert(masks_a[i], ImgLabeling))
         labelings_b.append(cs.convert(masks_b[i], ImgLabeling))
+        labelings_xor.append(cs.convert(masks_xor[i], ImgLabeling))
     
     # create table with headers
-    table = DefaultGenericTable(7, 0)
+    table = DefaultGenericTable(9, 0)
     table.setColumnHeader(0, "name")
     table.setColumnHeader(1, "{}_roi_size".format(ch_a_name))
     table.setColumnHeader(2, "{}_roi_mfi".format(ch_a_name))
     table.setColumnHeader(3, "{}_threshold_value".format(ch_a_name))
     table.setColumnHeader(4, "{}_size_in_p16_roi".format(ch_b_name))
     table.setColumnHeader(5, "{}_mfi_in_p16_roi".format(ch_b_name))
-    table.setColumnHeader(6, "{}_threshold_value".format(ch_b_name))
+    table.setColumnHeader(6, "{}_mfi_outside_p16_roi".format(ch_b_name))
+    table.setColumnHeader(7, "{}_roi_size".format(ch_b_name))
+    table.setColumnHeader(8, "{}_threshold_value".format(ch_b_name))
 
     for i in range(count):
         # extract label regions
         regs_a = LabelRegions(labelings_a[i])
+        regs_b = LabelRegions(labelings_b[i])
+        regs_xor = LabelRegions(labelings_xor[i])
 
         # extract region -- only one label should be in the labeling
         r_a = regs_a.getLabelRegion(1)
+        r_b = regs_b.getLabelRegion(1)
+        r_x = regs_xor.getLabelRegion(1)
 
         # create samples
         sample_a = Regions.sample(r_a, imgs_a[i]) # p16 label w/ p16 channel
+        sample_b = Regions.sample(r_b, imgs_b[i]) # MUC4 label w/ MUC4 channel
         sample_ab = Regions.sample(r_a, imgs_b[i]) # p16 label w/ MUC4 channel
         sample_ab_m = Regions.sample(r_a, labelings_b[i].getIndexImg()) # p16 label w/ MUC4 mask
+        sample_xor = Regions.sample(r_x, imgs_b[i]) # XOR mask w/ MUC4 channel
 
         # compute stats and write to table
         table.appendRow()
@@ -348,11 +362,13 @@ def process_batch(image_paths):
         table.set("{}_threshold_value".format(ch_a_name), i, thres_a)
         table.set("{}_size_in_p16_roi".format(ch_b_name), i, count_pixels(sample_ab_m))
         table.set("{}_mfi_in_p16_roi".format(ch_b_name), i, ijops.stats().mean(sample_ab).getRealDouble())
+        table.set("{}_mfi_outside_p16_roi".format(ch_b_name), i, ijops.stats().mean(sample_xor).getRealDouble())
+        table.set("{}_roi_size".format(ch_b_name), i, ops.op("stats.size").input(sample_b).apply())
         table.set("{}_threshold_value".format(ch_b_name), i, thres_b)
 
     if save:
         print("[INFO]: Creating mask stacks...")
-        stacks = create_mask_stack(imgs, (labelings_a, labelings_b))
+        stacks = create_mask_stack(imgs, (labelings_a, labelings_b, labelings_xor))
         for i in range(len(stacks)):
             print("[INFO]: Saving image {}_mask_stack.tif...".format(names[i]))
             io.save(stacks[i], os.path.join(in_dir.toString(), "{}_mask_stack.tif".format(names[i])))
@@ -363,3 +379,4 @@ def process_batch(image_paths):
 img_paths = get_file_paths(in_dir, ext)
 result_table = process_batch(img_paths)
 ui.show(result_table)
+print("[INFO]: Done!")
