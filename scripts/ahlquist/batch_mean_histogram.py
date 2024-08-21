@@ -63,10 +63,10 @@ def create_mask_stack(images, labelings_arr):
             smp = Regions.sample(r, msk)
             # set the pixels within the sample to 65535
             set_max_pixel_value(smp)
-            st.append(msk)
+            st.append(ops.op("transform.addDimensionView").input(msk, 1, 1).apply())
 
         # concatenate view along the same axis
-        stacks.append(Views.concatenate(2, StackView(st)))
+        stacks.append(Views.concatenate(2, st))
 
     return stacks
 
