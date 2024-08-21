@@ -22,7 +22,7 @@ from net.imglib2.type.numeric.integer import UnsignedShortType
 from net.imglib2.type.logic import BitType
 from net.imglib2.roi import Regions
 from net.imglib2.roi.labeling import ImgLabeling, LabelRegions
-from net.imglib2.view import StackView, Views
+from net.imglib2.view import Views
 
 from org.scijava.table import DefaultGenericTable
 
@@ -327,14 +327,14 @@ def process_batch(image_paths):
     # create table with headers
     table = DefaultGenericTable(9, 0)
     table.setColumnHeader(0, "name")
-    table.setColumnHeader(1, "{}_roi_size".format(ch_a_name))
-    table.setColumnHeader(2, "{}_roi_mfi".format(ch_a_name))
-    table.setColumnHeader(3, "{}_threshold_value".format(ch_a_name))
-    table.setColumnHeader(4, "{}_size_in_p16_roi".format(ch_b_name))
-    table.setColumnHeader(5, "{}_mfi_in_p16_roi".format(ch_b_name))
-    table.setColumnHeader(6, "{}_mfi_outside_p16_roi".format(ch_b_name))
-    table.setColumnHeader(7, "{}_roi_size".format(ch_b_name))
-    table.setColumnHeader(8, "{}_threshold_value".format(ch_b_name))
+    table.setColumnHeader(1, "{} ROI size".format(ch_a_name))
+    table.setColumnHeader(2, "{} ROI MFI".format(ch_a_name))
+    table.setColumnHeader(3, "{} threshold value".format(ch_a_name))
+    table.setColumnHeader(4, "{} size in {} ROI".format(ch_b_name, ch_a_name))
+    table.setColumnHeader(5, "{} MFI in {} ROI".format(ch_b_name, ch_a_name))
+    table.setColumnHeader(6, "{} MFI outside {} ROI".format(ch_b_name, ch_a_name))
+    table.setColumnHeader(7, "{} ROI size".format(ch_b_name))
+    table.setColumnHeader(8, "{} threshold value".format(ch_b_name))
 
     for i in range(count):
         # extract label regions
@@ -357,14 +357,14 @@ def process_batch(image_paths):
         # compute stats and write to table
         table.appendRow()
         table.set("name", i, names[i])
-        table.set("{}_roi_size".format(ch_a_name), i, ops.op("stats.size").input(sample_a).apply())
-        table.set("{}_roi_mfi".format(ch_a_name), i, ijops.stats().mean(sample_a).getRealDouble())
-        table.set("{}_threshold_value".format(ch_a_name), i, thres_a)
-        table.set("{}_size_in_p16_roi".format(ch_b_name), i, count_pixels(sample_ab_m))
-        table.set("{}_mfi_in_p16_roi".format(ch_b_name), i, ijops.stats().mean(sample_ab).getRealDouble())
-        table.set("{}_mfi_outside_p16_roi".format(ch_b_name), i, ijops.stats().mean(sample_xor).getRealDouble())
-        table.set("{}_roi_size".format(ch_b_name), i, ops.op("stats.size").input(sample_b).apply())
-        table.set("{}_threshold_value".format(ch_b_name), i, thres_b)
+        table.set("{} ROI size".format(ch_a_name), i, ops.op("stats.size").input(sample_a).apply())
+        table.set("{} ROI MFI".format(ch_a_name), i, ijops.stats().mean(sample_a).getRealDouble())
+        table.set("{} threshold value".format(ch_a_name), i, thres_a)
+        table.set("{} size in {} ROI".format(ch_b_name, ch_a_name), i, count_pixels(sample_ab_m))
+        table.set("{} MFI in {} ROI".format(ch_b_name, ch_a_name), i, ijops.stats().mean(sample_ab).getRealDouble())
+        table.set("{} MFI outside {} ROI".format(ch_b_name, ch_a_name), i, ijops.stats().mean(sample_xor).getRealDouble())
+        table.set("{} ROI size".format(ch_b_name), i, ops.op("stats.size").input(sample_b).apply())
+        table.set("{} threshold value".format(ch_b_name), i, thres_b)
 
     if save:
         print("[INFO]: Creating mask stacks...")
