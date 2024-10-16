@@ -8,12 +8,12 @@
 #@ Integer (label = "Nuclear channel position", min = 1, value = 1) ch_nuc
 #@ Integer (label = "Puncta channel position", min = 1, value = 2) ch_pun
 #@ Integer (label = "Nuclear marker channel position", min = 1, value = 3) ch_mrk
-#@ String (visibility=MESSAGE, value="<b>Cellpose settings</b>", required=false) cp_msg
+#@ String (visibility=MESSAGE, value="<b>(Nuclear Segmentation)  ---  Cellpose settings</b>", required=false) cp_msg
 #@ String (label="Cellpose Python path:") cp_py_path 
-#@ String (label="Pretrained model:", choices={"cyto", "cyto2", "nuclei"}, style="listBox") model
+#@ String (label="Pretrained model:", choices={"cyto", "cyto2", "nuclei"}, style="listBox", value = "nuclei") model
 #@ Float (label="Diameter (2D only):", style="format:0.00", value=0.00, stepSize=0.01) diameter
 #@ Boolean (label="Enable 3D segmentation:", value=False) use_3d
-#@ String (visibility=MESSAGE, value="<b>Deconvolution settings</b>", required=false) decon_msg
+#@ String (visibility=MESSAGE, value="<b>(Puncta Segmentation)  ---  Deconvolution settings</b>", required=false) decon_msg
 #@ Integer (label="Iterations:", value=15) iterations
 #@ Float (label="Numerical Aperture:", style="format:0.00", min=0.00, value=1.40) numerical_aperture
 #@ Integer (label="Emission Wavelength (nm):", value=461) wvlen
@@ -23,6 +23,8 @@
 #@ Float (label="Axial resolution (μm/pixel):", style="format:0.0000", min=0.0000, value=0.26) ax_res
 #@ Float (label="Particle/sample Position (μm):", style="format:0.0000", min=0.0000, value=0) pz
 #@ Float (label="Regularization factor:", style="format:0.00000", min=0.00000, value=0.002) reg_factor
+#@ String (visibility=MESSAGE, value="<b>(Puncta Segmentation)  ---  Threshold settings</b>", required=false) thresh_msg
+#@ String (label="Global threshold method:", choices={"huang", "ij1", "intermodes", "isoData", "li", "maxEntropy", "maxLikelihood", "mean", "minError", "minimum", "moments", "otsu", "percentile", "renyiEntropy", "rosin", "shanbhag", "triangle", "yen"}, style="listBox", value = "triangle") thresh_method
 
 import os
 import subprocess
@@ -368,7 +370,7 @@ def run_puncta_labeling(image):
 
     print("[INFO]: Creating image labeling...")
     thres = ops.op("create.img").input(puncta_img, BitType()).apply()
-    ops.op("threshold.triangle").input(puncta_img).output(thres).compute()
+    ops.op("threshold.{}".format(thresh_method)).input(puncta_img).output(thres).compute()
 
     return ops.op("labeling.cca").input(thres, StructuringElement.EIGHT_CONNECTED).apply()
 
