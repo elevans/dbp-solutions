@@ -11,7 +11,7 @@
 #@ String (visibility=MESSAGE, value="<b>(Nuclear Segmentation)  ---  Cellpose settings</b>", required=false) cp_msg
 #@ String (label="Cellpose Python path:") cp_py_path 
 #@ String (label="Pretrained model:", choices={"cyto", "cyto2", "nuclei"}, style="listBox", value = "nuclei") model
-#@ Float (label="Diameter (2D only):", style="format:0.00", value=0.00, stepSize=0.01) diameter
+#@ Float (label="Diameter:", style="format:0.00", value=0.00, stepSize=0.01) diameter
 #@ Boolean (label="Enable 3D segmentation:", value=False) use_3d
 #@ String (visibility=MESSAGE, value="<b>(Puncta Segmentation)  ---  Deconvolution settings</b>", required=false) decon_msg
 #@ Integer (label="Iterations:", value=15) iterations
@@ -122,7 +122,7 @@ def median(vals):
             return vals[mid]
         else:
             # reject double assignment of nuc
-            return vals[0] # default to the lowest label number?
+            return vals[0] # default to the first label number?
     else:
         return vals[mid]
 
@@ -149,17 +149,27 @@ def compute_puncta_stats(image, labeling):
 
     # set up table headers
     table = DefaultGenericTable(3, 0)
-    table.setColumnHeader(0, "label")
+    table.setColumnHeader(0, "puncta label")
     table.setColumnHeader(1, "size (pixels)")
     table.setColumnHeader(2, "MFI")
 
-    i = 0
+    # key: puncta label, value: puncta sample
+    p_map = {}
     for r in regs:
-        sample = Regions.sample(r, image)
+        ps = Regions.sample(r, image)
+        # filter based on minimum and maximum bounds
+        p_size = ops.op("stats.size").input(ps).apply()
+        if p_size < pun_min_size or p_size > pun_max_size:
+            # skip if the puncta size is outside min/max bounds
+            continue
+        p_map[r.getLabel()] = ps
+
+    i = 0
+    for k, v in p_map.items():
         table.appendRow()
-        table.set("label", i, int(r.getLabel()))
-        table.set("size (pixels)", i, ijops.stats().size(sample).getRealDouble())
-        table.set("MFI", i, ijops.stats().mean(sample).getRealDouble())
+        table.set("puncta label", i, k)
+        table.set("size (pixels)", i, ops.op("stats.size").input(v).apply())
+        table.set("MFI", i, ijops.stats().mean(v).getRealDouble())
         i += 1
 
     return table
@@ -382,7 +392,7 @@ def run_cellpose(image):
 
     # build cellpose command
     if use_3d:
-        cp_cmd = "cellpose --dir {} --pretrained_model {} --save_tif --do_3D".format(tmp_dir, model)
+        cp_cmd = "cellpose --dir {} --pretrained_model {} --save_tif --do_3D --diam_mean {}".format(tmp_dir, model, diameter)
     else:
         cp_cmd = "cellpose --dir {} --pretrained_model {} --diameter {} --save_tif".format(tmp_dir, model, diameter)
 
