@@ -4,7 +4,7 @@
 #@ IOService io
 #@ UIService ui
 #@ Img img
-#@ String (visibility=MESSAGE, value="<b>Channel settings</b>", required=false) ch_msg
+#@ String (visibility = MESSAGE, value = "<b>Channel settings</b>", required = false) ch_msg
 #@ Integer (label = "Nuclear channel position", min = 1, value = 1) ch_nuc
 #@ Integer (label = "Puncta channel position", min = 1, value = 2) ch_pun
 #@ Integer (label = "Nuclear marker channel position", min = 1, value = 3) ch_mrk
@@ -25,6 +25,9 @@
 #@ Float (label="Regularization factor:", style="format:0.00000", min=0.00000, value=0.002) reg_factor
 #@ String (visibility=MESSAGE, value="<b>(Puncta Segmentation)  ---  Threshold settings</b>", required=false) thresh_msg
 #@ String (label="Global threshold method:", choices={"huang", "ij1", "intermodes", "isoData", "li", "maxEntropy", "maxLikelihood", "mean", "minError", "minimum", "moments", "otsu", "percentile", "renyiEntropy", "rosin", "shanbhag", "triangle", "yen"}, style="listBox", value = "triangle") thresh_method
+#@ String (visibility=MESSAGE, value="<b>(Puncta Segmentation)  ---  Puncta size filter</b>", required=false) thresh_msg
+#@ Integer (label = "Minimum puncta size", min = 0, value = 1) pun_min_size
+#@ Integer (label = "Maximum puncta size", min = 0, value = 1) pun_max_size
 
 import os
 import subprocess
@@ -59,17 +62,69 @@ def check_for_null_mask(sample):
         Boolean indicating whether all pixels within the
         given sample equal 0.
     """
-    c = sample.cursor()
-    px_vals = []
-    while c.hasNext():
-        c.fwd()
-        px_vals.append(c.get().getInteger())
-    px_vals = list(set(px_vals))
+    px_vals = list(set(sample_to_list(sample)))
     if len(px_vals) == 1 and px_vals[0] == 0:
         # all pixels are zero in sample
         return False
     else:
         return True
+
+
+def sample_to_list(sample, skip=True):
+    """Convert a sample's pixels into a list.
+
+    :param sample:
+
+        An ImgLib2 sample.
+
+    :param skip:
+
+        Skip the background label (i.e. skip 0).
+
+    :return:
+
+        A list of pixel values.
+    """
+    c = sample.cursor()
+    vals = []
+    while c.hasNext():
+        c.fwd()
+        v = c.get().getInteger()
+        if skip and v == 0:
+            continue
+        else:
+            vals.append(c.get().getInteger())
+
+    return vals
+
+
+def median(vals):
+    """Compute the median from a list of integers.
+
+    Compute the median value from a list of integers.
+
+    :param vals:
+
+        A list of integer values.
+
+    :return:
+        
+        The median value of the list.
+    """
+    vals = sorted(vals)
+    n = len(vals)
+    mid = n // 2
+
+    if n % 2 == 0:
+        a = vals[mid -1]
+        b = vals[mid]
+        if a == b:
+            return vals[mid]
+        else:
+            # reject double assignment of nuc
+            return vals[0] # default to the lowest label number?
+    else:
+        return vals[mid]
 
 
 def compute_puncta_stats(image, labeling):
@@ -91,7 +146,6 @@ def compute_puncta_stats(image, labeling):
     """
     # extract regions
     regs = LabelRegions(labeling)
-    reg_labels = regs.getExistingLabels()
 
     # set up table headers
     table = DefaultGenericTable(3, 0)
@@ -132,34 +186,74 @@ def compute_nuclear_stats(images, n_labeling, m_labeling, p_labeling):
 
         A SciJava Table.
     """
-    # extract nuclear regions
+    # extract regions
     n_regs = LabelRegions(n_labeling)
-    n_regs_labels = n_regs.getExistingLabels()
-
+    p_regs = LabelRegions(p_labeling)
+    p_ex_labels = p_regs.getExistingLabels()
+    
     # set up table column headers
     table = DefaultGenericTable(4, 0)
-    table.setColumnHeader(0, "label")
-    table.setColumnHeader(1, "size (pixels)")
-    table.setColumnHeader(2, "nuclear marker MFI")
-    table.setColumnHeader(3, "number of puncta")
+    table.setColumnHeader(0, "nuclear label")
+    table.setColumnHeader(1, "puncta labels")
+    table.setColumnHeader(2, "number of puncta")
+    table.setColumnHeader(3, "nuclear marker MFI")
 
+    # get label/index images
+    n_idx_img = n_labeling.getIndexImg()
     m_idx_img = m_labeling.getIndexImg()
     p_idx_img = p_labeling.getIndexImg()
-    i = 0
+   
+    # create and populate results dicts/maps 
+    n_p_map = {}
+    n_m_map = {}
     for r in n_regs:
-        ms = Regions.sample(r, m_idx_img)
-        ps = Regions.sample(r, p_idx_img)
-        mrk_s = Regions.sample(r, images[ch_mrk - 1])
+        # find all puncta labels within the nuclear ROI
+        nuc_label = r.getLabel()
+        nps = Regions.sample(r, p_idx_img)
+        labels = list(set(sample_to_list(nps)))
+        # compute the median label from the puncta sample
+        median_labels = []
+        for l in labels:
+            # get label region, check against existing labels
+            if l not in p_ex_labels:
+                # skip if the label doesn't exist
+                continue
+            # create a sample of puncta region over nuclear labels
+            pr = p_regs.getLabelRegion(l)
+            ps = Regions.sample(pr, n_idx_img)
+            # filter based on minimum and maximum bounds
+            p_size = ops.op("stats.size").input(ps).apply()
+            if p_size < pun_min_size or p_size > pun_max_size:
+                # skip if the puncta size is outside min/max bounds
+                continue
+            # check for empty lists 
+            pixel_vals = sample_to_list(ps)
+            if not pixel_vals:
+                continue
+            else:
+                # get median pixel value (i.e. which most of puncta signal exists)
+                p_median = median(pixel_vals)
+                if p_median == nuc_label:
+                    # puncta is mostly in this mask, append
+                    median_labels.append(l)
+                else:
+                    # puncta is mostly in another mask, skip
+                    continue
+
+        if median_labels:
+            # create nuclear marker sample
+            mks = Regions.sample(r, images[ch_mrk - 1])
+            # populate the dictionaries
+            n_p_map[nuc_label] = median_labels
+            n_m_map[nuc_label] = ijops.stats().mean(mks).getRealDouble()
+    
+    i = 0
+    for k, v in n_p_map.items():
         table.appendRow()
-        table.set("label", i , int(r.getLabel()))
-        table.set("size (pixels)", i, ops.op("stats.size").input(ps).apply())
-        table.set("nuclear marker MFI", i, ijops.stats().mean(mrk_s).getRealDouble())
-        #mrk_status = check_for_null_mask(ms)
-        #if mrk_status is True:
-        #    table.set("marker status", i, 1)
-        #else:
-        #    table.set("marker status", i, 0)
-        table.set("number of puncta", i, count_sample_labels(ps))
+        table.set("nuclear label", i, k)
+        table.set("puncta labels", i, v)
+        table.set("number of puncta", i, len(v))
+        table.set("nuclear marker MFI", i, n_m_map.get(k))
         i += 1
 
     return table
@@ -380,9 +474,23 @@ def run_puncta_labeling(image):
 # - Link to the ROI manager (link table to image)
 # - Better seperate the puncta in Z axis
 # - Investigate OSError on macOS analysis computer
-
-# brightest pixel reduction
-
+# - Need a better way to decide puncta nuclear assignment (1)
+#   - Where the max signal is? Use that to assign to nucleus
+#   - Where the centroid mass is? Use that to assign to nucleus
+#   - Where sum of the signal (area sum) of the puncta?
+# - Filter for puncta size before nuclear assignment (1)
+#   - Allow pixel size entry
+#   - Double nuclear rejection (i.e. if a nucleus has a doublet
+#     remove that nucleus and all associated puncta from the analysis
+#   - All of this should be optional
+# - Better geen channel measurements (klf4l) (3)
+#   - Problem is the pixel MFI is kinda weak -- can we do better?
+#   - Crop based on nuclear bounding box, threshold the green signal
+#     check for threshold size (signal should be within some adjustable
+#     threshold for the ratio of nuclear size).
+# - Support for dim puncta (2)
+#   - maybe add optinal boolean for dim puncta extra steps
+#   - Yu-Hsuan will send data
 # split channels
 chs = split_img(img)
 
