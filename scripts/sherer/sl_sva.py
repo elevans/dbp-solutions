@@ -1,9 +1,16 @@
 #@ OpEnvironment ops
 #@ OpService ijops
+#@ ConvertService cs
 #@ UIService ui
-#@ ImgPlus img
+#@ Img (label = "Input image:", autofill = false) img
+#@ String (visibility = MESSAGE, value ="<b>[ Channel selection settings ]</b>", required = false) ch_msg
 #@ String (label = "Channel A name", value = "mCherry") ch_a_name
 #@ String (label = "Channel B name", value = "YFP") ch_b_name
+#@ String (visibility = MESSAGE, value ="<b>[ Filter settings ]</b>", required = false) fs_msg
+#@ Double (label = "High pass filter Sigma:", style = "format:0.00", min = 0.0, value = 17.0) hp_sigma
+#@ Integer (label = "Minimum puncta size (pixels):", min = 0, value = 0) min_size
+#@ Integer (label = "Maximum puncta size (pixels):", min = 0, value = 0) max_size
+#@ String (visibility = MESSAGE, value ="<b>[ Calibration settings ]</b>", required = false) cal_msg
 #@ Float (label = "Image calibration", style = "format:0.0000", value = 0.13) cal
 #@output Img output
 
@@ -62,12 +69,74 @@ def gaussian_subtraction(image, sigma):
 
     return out
 
-# process the data
+
+def size_filter_labeling(labeling, min_size, max_size=None):
+    """Apply a size filter to an ImgLabeling.
+
+    Apply a size filter to an ImgLabeling. Labels that are within the minimum
+    and maximum bounds provided are retained.
+
+    :param labeling:
+
+        Input ImgLabeling.
+
+    :param min_size:
+
+        Minimum number of label pixels. If None, then the minimum
+        value is set to 0.
+
+    :param max_size:
+
+        Maximum number of label pixles. If None, then the maximum
+        value is set to dim lengths X * Y.
+    """
+    # get label image from the labeling
+    idx_img = labeling.getIndexImg()
+
+    # set max/min defaults if necessary
+    if not min_size:
+        min_size = 0
+
+    if not max_size:
+        dims = idx_img.dimensionsAsLongArray()
+        max_size = dims[0] * dims[1]
+
+    # get a smple over the label image and remove outside size bounds
+    regs = LabelRegions(labeling)
+    for r in regs:
+        s = Regions.sample(r, idx_img)
+        l = int(ops.op("stats.size").input(s).apply())
+        if l <= min_size or l >= max_size:
+            remove_label(s)
+
+    return cs.convert(idx_img, ImgLabeling)# process the data
+
+
+def remove_label(sample):
+    """Set a label to 0.
+
+    Set the given sample region pixel values to 0.
+
+    :param sample:
+
+        A sample region.
+    """
+    # get the sample region's cursor
+    c = sample.cursor()
+    # set all pixels within the sample region to 0
+    while c.hasNext():
+        c.fwd()
+        c.get().set(0)
+
+# run the analysis
 chs = split_img(img)
-sub = gaussian_subtraction(chs[1], 17.0)
+sub = gaussian_subtraction(chs[1], hp_sigma)
 ths = ops.op("create.img").input(sub, BitType()).apply()
 ops.op("threshold.triangle").input(sub).output(ths).compute()
 labeling = ops.op("labeling.cca").input(ths, StructuringElement.EIGHT_CONNECTED).apply()
+
+# apply size filter to the labeling
+labeling = size_filter_labeling(labeling, min_size, max_size)
 
 # compute stats and populate table
 regs = LabelRegions(labeling)
