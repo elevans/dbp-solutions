@@ -20,6 +20,9 @@
 #@ Float (label = "Diameter:", style = "format:0.00", value=0.00, stepSize=0.01) cp_diameter
 #@ Boolean (label = "Enable 3D segmentation:", value = True) use_3d
 #@ Boolean (label = "Show nuclear label image:", value = false) nuc_show
+#@ String (visibility = MESSAGE, value ="<b>[ Results settings ]</b>", required = false) rslt_msg
+#@ Boolean (label = "Show puncta results table:", value = true) show_puncta_results
+#@ Boolean (label = "Show nuclei results table:", value = true) show_nuclei_results
 #@output Img output
 
 import array
@@ -229,29 +232,35 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
     # initialize the results tables
     p_table = DefaultGenericTable(4, 0)
     n_table = DefaultGenericTable(3, 0)
+
     # set up puncta table headers
     p_table.setColumnHeader(0, "foci ID")
     p_table.setColumnHeader(1, "cell ID")
     p_table.setColumnHeader(2, "foci MFI")
     p_table.setColumnHeader(3, "foci size (pixels)")
+
     # set up nuclei table headers
     n_table.setColumnHeader(0, "cell ID")
     n_table.setColumnHeader(1, "marker MFI")
     n_table.setColumnHeader(2, "marker size (pixels)")
+
     # extract puncta and nuclei regions
     p_regions = LabelRegions(puncta_labeling)
     n_regions = LabelRegions(nuclei_labeling)
+
     # extract puncta and nuclei index images (for linking)
     p_idx_img = puncta_labeling.getIndexImg()
     n_idx_img = nuclei_labeling.getIndexImg()
+
+    # create puncta results table
     i = 0
     for p in p_regions:
         # sample: puncta of puncta index image -> puncta ID
         p_pi_sample = Regions.sample(p, p_idx_img)
-        # sample: puncta of nuclei index image -> nuclear ID
+        # sample: puncta of nuclei index image -> nuclei ID
         p_ni_sample = Regions.sample(p, n_idx_img)
         # sample: punta of puncta raw -> intensity measurements
-        p_pr_sample = Regions.sample(p, channels[0])
+        p_pr_sample = Regions.sample(p, channels[int(p_ch) - 1])
         p_id = p_pi_sample.firstElement()
         # be smarter about nuclei detection
         n_id = find_most_common_value(p_ni_sample)
@@ -266,7 +275,24 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
         p_table.set("foci size (pixels)", i, p_size)
         i += 1
 
-    return p_table
+    # create nuclei results table
+    i = 0
+    for n in n_regions:
+        # sample: nuclei of nuclei index -> nuclei ID
+        n_ni_sample = Regions.sample(n, n_idx_img)
+        # sample: nuclei of nuclei raw -> intensity measurements
+        n_nr_sample = Regions.sample(n, channels[int(n_ch) - 1])
+        n_id = n_ni_sample.firstElement()
+        n_mfi = ijops.stats().mean(n_nr_sample).getRealDouble()
+        n_size = ops.op("stats.size").input(n_nr_sample).apply()
+        # construct nuclei table
+        n_table.appendRow()
+        n_table.set("cell ID", i, n_id)
+        n_table.set("marker MFI", i, n_mfi)
+        n_table.set("marker size (pixels)", i, n_size)
+        i += 1
+
+    return (p_table, n_table)
 
 def remove_label(sample):
     """Set a label to 0.
@@ -360,6 +386,10 @@ def run(image):
         ui.show("nuclear label image", nuc_img_lb)
 
     # run measurements
-    ui.show("foci results table", measurements(chs, pun_img_ws, cs.convert(nuc_img_lb, ImgLabeling)))
+    results = measurements(chs, pun_img_ws, cs.convert(nuc_img_lb, ImgLabeling))
+    if show_puncta_results:
+        ui.show("foci results table", results[0])
+    if show_nuclei_results:
+        ui.show("nuclei results table", results[1])
 
 run(img)
