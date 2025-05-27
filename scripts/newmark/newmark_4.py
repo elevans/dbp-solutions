@@ -1,4 +1,5 @@
 #@ OpEnvironment ops
+#@ OpService ijops
 #@ ConvertService cs
 #@ IOService io
 #@ UIService ui
@@ -14,28 +15,29 @@
 #@ Integer (label = "Maximum puncta size (pixels):", min = 0, value = 0) max_size
 #@ Boolean (label = "Show puncta label image:", value = false) pun_show
 #@ String (visibility = MESSAGE, value ="<b>[ Cellpose nuclear segmentation settings ]</b>", required = false) cp_msg
-#@ String (label = "Cellpose Python path:") cp_py_path 
+#@ String (label = "Cellpose Python path:") cp_py_path
 #@ String (label = "Pretrained model:", choices = {"cyto", "cyto2", "cyto2_cp3", "cyto3", "nuclei", "livecell_cp3", "deepbacs_cp3", "tissuenet_cp3", "bact_fluor_cp3", "bact_phase_cp3", "neurips_cellpose_default", "neurips_cellpose_transformer", "neurips_grayscale_cyto2", "transformer_cp3", "yeast_BF_cp3", "yeast_PhC_cp3"}, style="listBox") cp_model
 #@ Float (label = "Diameter:", style = "format:0.00", value=0.00, stepSize=0.01) cp_diameter
 #@ Boolean (label = "Enable 3D segmentation:", value = True) use_3d
 #@ Boolean (label = "Show nuclear label image:", value = false) nuc_show
 #@output Img output
 
+import array
 import os
 import subprocess
 import shutil
+from collections import Counter
+from java.nio.file import Files
 
 from net.imglib2.algorithm.labeling.ConnectedComponents import StructuringElement
-from net.imglib2.algorithm.neighborhood import HyperSphereShape
 from net.imglib2.roi import Regions
 from net.imglib2.roi.labeling import ImgLabeling, LabelRegions
 from net.imglib2.type.logic import BitType
 from net.imglib2.type.numeric.real import FloatType
-
+from org.scijava.table import DefaultGenericTable
 from ij.gui import PointRoi
 from ij.plugin.frame import RoiManager
 
-from java.nio.file import Files
 
 def cca(image, se):
     """Run connecated component analysis.
@@ -102,7 +104,7 @@ def cellpose(image):
 
     # remove temp directory
     shutil.rmtree(tmp_dir.toString())
-    
+
     return cp_masks
 
 
@@ -157,6 +159,37 @@ def extract_channel(image, channel, axis=2):
         return ops.op("transform.hyperSliceView").input(image, axis, int(channel) - 1).apply()
 
 
+def find_most_common_value(sample):
+    """Find the most common value with in a sample region.
+
+    :param sample:
+
+        The labeling sample to iterate over.
+
+    :param size:
+
+        The number of elements in the sample.
+
+    :return:
+
+        The most common value in the sample.
+    """
+    # iterate over the sample and collect pixel values
+    vals = []
+    c = sample.cursor()
+    while c.hasNext():
+        c.fwd()
+        v = c.get().getInteger()
+        if v > 0:
+            vals.append(v)
+
+    # count the most common element in vals array
+    if vals:
+        return Counter(vals).most_common(1)[0][0]
+    else:
+        return "None"
+
+
 def gaussian_high_pass_filter(image, sigma):
     """Apply a Gaussian high pass filter to an input image.
 
@@ -181,6 +214,59 @@ def gaussian_high_pass_filter(image, sigma):
 
     return high_pass_image
 
+
+def measurements(channels, puncta_labeling, nuclei_labeling):
+    """Make measurements on input labelings.
+
+    :param channels:
+
+        A list of channels, (puncta, nuclei)
+
+    :return:
+
+        A results table.
+    """
+    # initialize the results tables
+    p_table = DefaultGenericTable(4, 0)
+    n_table = DefaultGenericTable(3, 0)
+    # set up puncta table headers
+    p_table.setColumnHeader(0, "foci ID")
+    p_table.setColumnHeader(1, "cell ID")
+    p_table.setColumnHeader(2, "foci MFI")
+    p_table.setColumnHeader(3, "foci size (pixels)")
+    # set up nuclei table headers
+    n_table.setColumnHeader(0, "cell ID")
+    n_table.setColumnHeader(1, "marker MFI")
+    n_table.setColumnHeader(2, "marker size (pixels)")
+    # extract puncta and nuclei regions
+    p_regions = LabelRegions(puncta_labeling)
+    n_regions = LabelRegions(nuclei_labeling)
+    # extract puncta and nuclei index images (for linking)
+    p_idx_img = puncta_labeling.getIndexImg()
+    n_idx_img = nuclei_labeling.getIndexImg()
+    i = 0
+    for p in p_regions:
+        # sample: puncta of puncta index image -> puncta ID
+        p_pi_sample = Regions.sample(p, p_idx_img)
+        # sample: puncta of nuclei index image -> nuclear ID
+        p_ni_sample = Regions.sample(p, n_idx_img)
+        # sample: punta of puncta raw -> intensity measurements
+        p_pr_sample = Regions.sample(p, channels[0])
+        p_id = p_pi_sample.firstElement()
+        # be smarter about nuclei detection
+        n_id = find_most_common_value(p_ni_sample)
+        # measure puncta intensity
+        p_mfi = ijops.stats().mean(p_pr_sample).getRealDouble()
+        p_size = ops.op("stats.size").input(p_pr_sample).apply()
+        # construct puncta table
+        p_table.appendRow()
+        p_table.set("foci ID", i, p_id)
+        p_table.set("cell ID", i, n_id)
+        p_table.set("foci MFI", i, p_mfi)
+        p_table.set("foci size (pixels)", i, p_size)
+        i += 1
+
+    return p_table
 
 def remove_label(sample):
     """Set a label to 0.
@@ -243,13 +329,21 @@ def size_filter_labeling(labeling, min_size, max_size=None):
 
 def run(image):
     """Pipeline entry point.
+
+    :param image:
+
+        The input image.
+
+    :return:
+
+        A tuple of ImgLabelings (puncta, nuclei)
     """
     # extract only specified channels
     chs = []
     chs.append(extract_channel(image, p_ch))
     chs.append(extract_channel(image, n_ch))
 
-    # puncta: segment and add center of mass to the ROI Manager 
+    # puncta: segment and add center of mass to the ROI Manager
     pun_img_hp = gaussian_high_pass_filter(chs[0], hp_sigma)
     pun_img_th = ops.op("create.img").input(pun_img_hp, BitType()).apply()
     ops.op("threshold.{}".format(threshold)).input(pun_img_hp).output(pun_img_th).compute()
@@ -259,12 +353,13 @@ def run(image):
     if pun_show:
         ui.show("puncta label image", pun_img_ws.getIndexImg())
 
-    # nuclear stain/marker - add to ROI Manager? 
+    # nuclear stain/marker - add to ROI Manager?
     nuc_img_gb = ops.op("filter.gauss").input(chs[1], 2.0).apply()
     nuc_img_lb = cellpose(nuc_img_gb)
     if nuc_show:
         ui.show("nuclear label image", nuc_img_lb)
 
-    # TODO add measurements
+    # run measurements
+    ui.show("foci results table", measurements(chs, pun_img_ws, cs.convert(nuc_img_lb, ImgLabeling)))
 
 run(img)
