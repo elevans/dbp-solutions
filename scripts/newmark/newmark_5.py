@@ -116,6 +116,7 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
     n_table.setColumnHeader(0, "cell ID")
     n_table.setColumnHeader(1, "marker MFI")
     n_table.setColumnHeader(2, "marker size (pixels)")
+    n_table.setColumnHeader(3, "foci count")
 
     # extract puncta and nuclei regions
     p_regions = LabelRegions(puncta_labeling)
@@ -125,6 +126,8 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
     p_idx_img = puncta_labeling.getIndexImg()
     n_idx_img = nuclei_labeling.getIndexImg()
 
+    # nuclei/puncta map
+    nuc_pun_count = {}
     # create puncta results table
     i = 0
     for p in p_regions:
@@ -137,6 +140,10 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
         p_id = p_pi_sample.firstElement()
         # be smarter about nuclei detection
         n_id = find_most_common_value(p_ni_sample)
+        if n_id not in nuc_pun_count.keys():
+            nuc_pun_count[n_id] = 1
+        else:
+            nuc_pun_count[n_id] += 1
         # measure puncta intensity
         p_mfi = ij.op().stats().mean(p_pr_sample).getRealDouble()
         p_size = ij.op().stats().size(p_pr_sample).getRealDouble()
@@ -163,6 +170,7 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
         n_table.set("cell ID", i, n_id)
         n_table.set("marker MFI", i, n_mfi)
         n_table.set("marker size (pixels)", i, n_size)
+        n_table.set("foci count", i, nuc_pun_count.get(n_id))
         i += 1
 
     return (p_table, n_table)
