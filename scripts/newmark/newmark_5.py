@@ -243,7 +243,7 @@ def run(image):
             ui.show(mar_mask)
 
     # run measurements
-    results = measurements()
+    results = measurements(chs, pun_img_ws, ij.convert().convert(nuc_msk, ImgLabeling))
     if show_puncta_results:
         ui.show("foci results table", results[0])
     if show_nuclei_results:
