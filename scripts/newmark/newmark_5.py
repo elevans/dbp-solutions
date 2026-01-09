@@ -14,6 +14,10 @@
 #@ String (label = "Global threshold method:", choices={"huang", "ij1", "intermodes", "isoData", "li", "maxEntropy", "maxLikelihood", "mean", "minError", "minimum", "moments", "otsu", "percentile", "renyiEntropy", "rosin", "shanbhag", "triangle", "yen"}, style="listBox") threshold
 #@ Integer (label = "Minimum puncta size (pixels):", min = 0, value = 0) min_size
 #@ Integer (label = "Maximum puncta size (pixels):", min = 0, value = 0) max_size
+#@ String (visibility = MESSAGE, value ="<b>[ Cellpose settings ]</b>", required = false) cp_msg
+#@ Float (label = "Diameter:", style = "format:0.00", min = 0.0, value = 30.0) diameter
+#@ Float (label = "Flow threshold:", style = "format:0.00", min = 0.0, value = 4.0) flow_threshold
+#@ Float (label = "Cell probability threshold:", style = "format:0.00", min = 0.0, value = 0.0) cellprob_threshold
 #@ String (visibility = MESSAGE, value ="<b>[ Results settings ]</b>", required = false) rslt_msg
 #@ Boolean (label = "Show puncta label image:", value = false) pun_show
 #@ Boolean (label = "Show nuclear label image:", value = false) nuc_show
@@ -36,7 +40,12 @@ Regions = sj.jimport("net.imglib2.roi.Regions")
 def cellpose(image):
     arr = ij.py.to_xarray(image).data
     model = models.CellposeModel(gpu=True)
-    mask, flow, styles = model.eval(arr, z_axis=0, do_3D=True)
+    mask, flow, styles = model.eval(arr,
+    			z_axis=0,
+    			diameter=diameter,
+    			flow_threshold=flow_threshold,
+    			cellprob_threshold=cellprob_threshold,
+    			do_3D=True)
 
     return mask
 
@@ -72,7 +81,7 @@ def extract_channel(image, channel, axis = 2):
     return ij.op().transform().hyperSliceView(image, axis, v - 1)
 
 
-def find_most_common_value():
+def find_most_common_value(sample):
     vals = []
     c = sample.cursor()
     while c.hasNext():
@@ -104,7 +113,8 @@ def gaussian_high_pass_filter(image, sigma):
 def measurements(channels, puncta_labeling, nuclei_labeling):
     # initialize the results tables
     p_table = DefaultGenericTable(4, 0)
-    n_table = DefaultGenericTable(3, 0)
+    n_table = DefaultGenericTable(4, 0)
+
 
     # set up puncta table headers
     p_table.setColumnHeader(0, "foci ID")
@@ -162,8 +172,8 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
         n_ni_sample = Regions.sample(n, n_idx_img)
         # sample: nuclei of nuclei raw -> intensity measurements
         n_nr_sample = Regions.sample(n, channels.get("nuc"))
-        n_id = n_ni_sample.firstElement()
-        n_mfi = ij.stats().mean(n_nr_sample).getRealDouble()
+        n_id = n_ni_sample.firstElement().getInteger()
+        n_mfi = ij.op().stats().mean(n_nr_sample).getRealDouble()
         n_size = ij.op().stats().size(n_nr_sample).getRealDouble()
         # construct nuclei table
         n_table.appendRow()
@@ -219,6 +229,7 @@ def run(image):
     :param image: The input image.
     """
     # extract specified channels
+    print("[INFO]: Extracting images...")
     chs = {}
     if p_ch != "None":
         chs["pun"] = (extract_channel(image, p_ch))
@@ -229,32 +240,37 @@ def run(image):
 
     # segment puncta channel and add to ROI manager
     if p_ch != "None":
-        pun_img_hp = gaussian_high_pass_filter(chs.get("pun"), hp_sigma)
-        pun_img_ths = ij.op().run(f"threshold.{threshold}", pun_img_hp)
-        pun_img_ws = ij.op().image().watershed(None, pun_img_ths, False, False, ws_sigma, pun_img_ths)
-        pun_img_ws = size_filter_labeling(pun_img_ws, min_size, max_size)
-        center_to_roi_manager(pun_img_ws)
-        if pun_show:
-            ui.show("puncta label image", pun_img_ws.getIndexImg())
+    	print("[INFO]: Processing the foci channel...")
+    	pun_img_hp = gaussian_high_pass_filter(chs.get("pun"), hp_sigma)
+    	pun_img_ths = ij.op().run(f"threshold.{threshold}", pun_img_hp)
+    	pun_img_ws = ij.op().image().watershed(None, pun_img_ths, False, False, ws_sigma, pun_img_ths)
+    	pun_img_ws = size_filter_labeling(pun_img_ws, min_size, max_size)
+    	center_to_roi_manager(pun_img_ws)
+    	if pun_show:
+    		ui.show("puncta label image", pun_img_ws.getIndexImg())
 
     # segment nuclear channel
     if n_ch != "None":
-        nuc_img_gb = ij.op().filter().gauss(chs.get("nuc"), 2.0)
-        nuc_msk = cellpose(nuc_img_gb)
-        if nuc_show:
-            ui.show(nuc_msk)
+    	print("[INFO]: Running cellpose on nuclear channel...")
+    	nuc_img_gb = ij.op().filter().gauss(chs.get("nuc"), 2.0)
+    	nuc_msk = cellpose(nuc_img_gb)
+    	if nuc_show:
+    		ui.show(ij.py.to_dataset(nuc_msk))
 
     # segment marker channel
     if m_ch != "None":
-        mar_mask = cellpose(chs.get("mar"))
-        if mar_show:
-            ui.show(mar_mask)
+    	print("[INFO]: Running cellpose on marker channel...")
+    	mar_mask = cellpose(chs.get("mar"))
+    	if mar_show:
+    	    ui.show(ij.py.to_dataset(mar_mask))
 
     # run measurements
-    results = measurements(chs, pun_img_ws, ij.convert().convert(nuc_msk, ImgLabeling))
+    print("[INFO]: Calculating measurements...")
+    results = measurements(chs, pun_img_ws, ij.convert().convert(ij.py.to_dataset(nuc_msk), ImgLabeling))
     if show_puncta_results:
-        ui.show("foci results table", results[0])
+    	ui.show("foci results table", results[0])
     if show_nuclei_results:
-        ui.show("nuclei results table", results[1])
+    	ui.show("nuclei results table", results[1])
 
 run(img)
+print("[INFO]: Done!")
