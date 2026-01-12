@@ -1,6 +1,7 @@
 #@ OpService ops
 #@ UIService ui
 #@ Img (label = "Input image:", autofill = false) img
+#@ String (visibility = MESSAGE, value ="<b>[ Background suppression settings ]</b>", required = false) bk_msg
 #@ Integer (label = "Mean filter radius:", min = 0, value = 6) radius
 #@ String (choices={"Diamond", "Hyper Sphere"}, style="listBox", value = "Hyper Sphere") shape
 #@ Float (label="Gaussian blur Sigma:", style="format:0.00", min=0.0, value=7.00) sigma
