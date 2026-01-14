@@ -125,7 +125,7 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
     # set up nuclei table headers
     n_table.setColumnHeader(0, "cell ID")
     n_table.setColumnHeader(1, "marker MFI")
-    n_table.setCOlumnHeader(2, "sum intensity")
+    n_table.setColumnHeader(2, "sum intensity")
     n_table.setColumnHeader(3, "marker size (pixels)")
     n_table.setColumnHeader(4, "foci count")
 
