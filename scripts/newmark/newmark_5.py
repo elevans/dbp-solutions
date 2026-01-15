@@ -126,7 +126,7 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
     n_table.setColumnHeader(0, "cell ID")
     n_table.setColumnHeader(1, "marker MFI")
     n_table.setColumnHeader(2, "sum intensity")
-    n_table.setColumnHeader(3, "marker size (pixels)")
+    n_table.setColumnHeader(3, "nucleus size (pixels)")
     n_table.setColumnHeader(4, "foci count")
 
     # extract puncta and nuclei regions
@@ -173,16 +173,17 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
         n_ni_sample = Regions.sample(n, n_idx_img)
         # sample: nuclei of nuclei raw -> intensity measurements
         n_nr_sample = Regions.sample(n, channels.get("nuc"))
+        n_mr_sample = Regions.sample(n, channels.get("mar"))
         n_id = n_ni_sample.firstElement().getInteger()
-        n_sfi = ij.op().stats().sum(n_nr_sample).getRealDoube()
-        n_mfi = ij.op().stats().mean(n_nr_sample).getRealDouble()
+        m_sfi = ij.op().stats().sum(n_mr_sample).getRealDouble()
+        m_mfi = ij.op().stats().mean(n_mr_sample).getRealDouble()
         n_size = ij.op().stats().size(n_nr_sample).getRealDouble()
         # construct nuclei table
         n_table.appendRow()
         n_table.set("cell ID", i, n_id)
-        n_table.set("marker MFI", i, n_mfi)
-        n_table.set("sum intensity", i, n_sfi)
-        n_table.set("marker size (pixels)", i, n_size)
+        n_table.set("marker MFI", i, m_mfi)
+        n_table.set("sum intensity", i, m_sfi)
+        n_table.set("nucleus size (pixels)", i, n_size)
         n_table.set("foci count", i, nuc_pun_count.get(n_id))
         i += 1
 
