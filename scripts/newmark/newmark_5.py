@@ -21,7 +21,6 @@
 #@ String (visibility = MESSAGE, value ="<b>[ Results settings ]</b>", required = false) rslt_msg
 #@ Boolean (label = "Show puncta label image:", value = false) pun_show
 #@ Boolean (label = "Show nuclear label image:", value = false) nuc_show
-#@ Boolean (label = "Show marker label image:", value = fale) mar_show
 #@ Boolean (label = "Show puncta results table:", value = true) show_puncta_results
 #@ Boolean (label = "Show nuclei results table:", value = true) show_nuclei_results
 #@output Img output
@@ -260,13 +259,6 @@ def run(image):
     	nuc_msk = cellpose(nuc_img_gb)
     	if nuc_show:
     		ui.show(ij.py.to_dataset(nuc_msk))
-
-    # segment marker channel
-    if m_ch != "None":
-    	print("[INFO]: Running cellpose on marker channel...")
-    	mar_mask = cellpose(chs.get("mar"))
-    	if mar_show:
-    	    ui.show(ij.py.to_dataset(mar_mask))
 
     # run measurements
     print("[INFO]: Calculating measurements...")
