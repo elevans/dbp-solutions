@@ -112,7 +112,7 @@ def gaussian_high_pass_filter(image, sigma):
 def measurements(channels, puncta_labeling, nuclei_labeling):
     # initialize the results tables
     p_table = DefaultGenericTable(4, 0)
-    n_table = DefaultGenericTable(5, 0)
+    n_table = DefaultGenericTable(6, 0)
 
 
     # set up puncta table headers
@@ -124,9 +124,10 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
     # set up nuclei table headers
     n_table.setColumnHeader(0, "cell ID")
     n_table.setColumnHeader(1, "marker MFI")
-    n_table.setColumnHeader(2, "sum intensity")
-    n_table.setColumnHeader(3, "nucleus size (pixels)")
-    n_table.setColumnHeader(4, "foci count")
+    n_table.setColumnHeader(2, "sum intensity (marker)")
+    n_table.setColumnHeader(3, "sum intensity (nucleus)")
+    n_table.setColumnHeader(4, "nucleus size (pixels)")
+    n_table.setColumnHeader(5, "foci count")
 
     # extract puncta and nuclei regions
     p_regions = LabelRegions(puncta_labeling)
@@ -175,13 +176,15 @@ def measurements(channels, puncta_labeling, nuclei_labeling):
         n_mr_sample = Regions.sample(n, channels.get("mar"))
         n_id = n_ni_sample.firstElement().getInteger()
         m_sfi = ij.op().stats().sum(n_mr_sample).getRealDouble()
+        n_sfi = ij.op().stats().sum(n_nr_sample).getRealDouble()
         m_mfi = ij.op().stats().mean(n_mr_sample).getRealDouble()
         n_size = ij.op().stats().size(n_nr_sample).getRealDouble()
         # construct nuclei table
         n_table.appendRow()
         n_table.set("cell ID", i, n_id)
         n_table.set("marker MFI", i, m_mfi)
-        n_table.set("sum intensity", i, m_sfi)
+        n_table.set("sum intensity (marker)", i, m_sfi)
+        n_table.set("sum intensity (nucleus)", i, n_sfi)
         n_table.set("nucleus size (pixels)", i, n_size)
         n_table.set("foci count", i, nuc_pun_count.get(n_id))
         i += 1
