@@ -15,6 +15,9 @@
 #@ Integer (label = "Mean filter radius:", min = 0, value = 6) radius
 #@ String (choices={"Diamond", "Hyper Sphere"}, style="listBox", value = "Hyper Sphere") shape
 #@ Float (label="Gaussian blur Sigma:", style="format:0.00", min=0.0, value=7.00) sigma
+#@ String (visibility = MESSAGE, value ="<b>[ Data pre-processing settings ]</b>", required = false) pp_msg
+#@ Boolean (label = "Richardson-Lucy Total Variation deconvolution:", value = true) do_rltv
+#@ Boolean (label = "Gaussian high-pass filter:", value = true) do_ghpf
 #@output Img result
 
 from net.imglib2 import FinalDimensions
@@ -66,5 +69,9 @@ def suppress_background(image):
 # TODO: Results table 2D vs 3D title
 # TODO: Add size filter with min and maximum bounds
 
-decon = rltv_deconvolution(img, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor)
-result = suppress_background(decon)
+if do_rltv:
+    img = rltv_deconvolution(img, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor)
+if do_ghpf:
+    img = suppress_background(img)
+
+result = img
