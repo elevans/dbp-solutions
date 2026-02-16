@@ -1,7 +1,7 @@
 #@ OpService ops
 #@ UIService ui
 #@ Img (label = "Input image:", autofill = false) img
-#@ String (visibility = MESSAGE, value ="<b>[ RLTV deconvolution settings ]</b>", required = false) decon_msg
+#@ String (visibility = MESSAGE, value ="<b>[ Richardson-Lucy Total Variation (RLTV) deconvolution settings ]</b>", required = false) decon_msg
 #@ Integer iterations(label="Iterations", value=15)
 #@ Float (label="Numerical Aperture", style="format:0.00", min=0.00, value=1.45) na
 #@ Integer (label="Emission Wavelength (nm)", value=457) wavelength
@@ -13,22 +13,17 @@
 #@ Float (label="Regularization factor", style="format:0.00000", min=0.00000, value=0.002) reg_factor
 #@ String (visibility = MESSAGE, value ="<b>[ Background suppression settings ]</b>", required = false) bk_msg
 #@ Integer (label = "Mean filter radius:", min = 0, value = 6) radius
-#@ String (choices={"Diamond", "Hyper Sphere"}, style="listBox", value = "Hyper Sphere") shape
-#@ Float (label="Gaussian blur Sigma:", style="format:0.00", min=0.0, value=7.00) sigma
+#@ String (label = "Mean filter dimensonality:", choices={"2D", "3D"}, style="listBox", value = "3D") mean_filter_dim
+#@ Float (label="Gaussian blur Sigma:", style="format:0.00", min=0.0, value=25.00) sigma
 #@ String (visibility = MESSAGE, value ="<b>[ Data pre-processing settings ]</b>", required = false) pp_msg
-#@ Boolean (label = "Richardson-Lucy Total Variation deconvolution:", value = true) do_rltv
-#@ Boolean (label = "Gaussian high-pass filter:", value = true) do_ghpf
+#@ Boolean (label = "RLTV deconvolution:", value = true) do_rltv
+#@ Boolean (label = "Suppress background:", value = true) do_bksp
 #@output Img result
 
 from net.imglib2 import FinalDimensions
-from net.imglib2.algorithm.neighborhood import (DiamondShape,
-                                                HyperSphereShape)
+from net.imglib2.algorithm.neighborhood import HyperSphereShape
 from net.imglib2.type.numeric.real import FloatType
-
-shape_map = {
-    "Diamond": DiamondShape,
-    "Hyper Sphere": HyperSphereShape,
-}
+from net.imglib2.view import Views
 
 def rltv_deconvolution(image, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor):
     """Deconvolve an image with the Richardson-Lucy Total Variation (RTLV) algorithm.  
@@ -53,12 +48,21 @@ def rltv_deconvolution(image, na, wavelength, ri_sample, ri_immersion, xy_res, z
 
     return ops.deconvolve().richardsonLucyTV(image, psf, iterations, reg_factor)
 
-
 def suppress_background(image):
     # apply mean filter
     image = ops.convert().float32(image)
-    image_mean = ops.create().img(image)
-    ops.filter().mean(image_mean, img, shape_map.get(shape)(radius))
+    if mean_filter_dim == "3D":
+        image_mean = ops.create().img(image)
+        ops.filter().mean(image_mean, img, HyperSphereShape(radius))
+    else:
+        shape = HyperSphereShape(radius)
+        stack = []
+        for i in range(image.dimensionsAsLongArray()[2]):
+            view = ops.transform().hyperSliceView(image, 2, i)
+            m_img = ops.create().img(view)
+            ops.filter().mean(m_img, view, shape)
+            stack.append(ops.transform().addDimensionView(m_img, 1, 1))
+        image_mean = Views.concatenate(2, stack)
     image = ops.math().multiply(image, image_mean)
     # apply high pass Gaussian filter
     image_gauss = ops.filter().gauss(image, sigma)
@@ -71,7 +75,7 @@ def suppress_background(image):
 
 if do_rltv:
     img = rltv_deconvolution(img, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor)
-if do_ghpf:
+if do_bksp:
     img = suppress_background(img)
 
 result = img
