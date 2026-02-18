@@ -1,4 +1,4 @@
-#@ OpService ops
+#@ OpEnvironment ops
 #@ UIService ui
 #@ Img (label = "Input image:", autofill = false) img
 #@ String (visibility = MESSAGE, value ="<b>[ Richardson-Lucy Total Variation (RLTV) deconvolution settings ]</b>", required = false) decon_msg
@@ -15,67 +15,104 @@
 #@ Integer (label = "Mean filter radius:", min = 0, value = 6) radius
 #@ String (label = "Mean filter dimensonality:", choices={"2D", "3D"}, style="listBox", value = "3D") mean_filter_dim
 #@ Float (label="Gaussian blur Sigma:", style="format:0.00", min=0.0, value=25.00) sigma
+#@ String (visibility = MESSAGE, value ="<b>[ Segmentation settings ]</b>", required = false) seg_msg
+#@ String (label="Global threshold method:", choices={"huang", "ij1", "intermodes", "isoData", "li", "maxEntropy", "maxLikelihood", "mean", "minError", "minimum", "moments", "otsu", "percentile", "renyiEntropy", "rosin", "shanbhag", "triangle", "yen"}, style="listBox") method
+
 #@ String (visibility = MESSAGE, value ="<b>[ Data pre-processing settings ]</b>", required = false) pp_msg
 #@ Boolean (label = "RLTV deconvolution:", value = true) do_rltv
 #@ Boolean (label = "Suppress background:", value = true) do_bksp
 #@output Img result
 
 from net.imglib2 import FinalDimensions
+from net.imglib2.algorithm.labeling.ConnectedComponents import StructuringElement
 from net.imglib2.algorithm.neighborhood import HyperSphereShape
+from net.imglib2.type.numeric.logic import BitType
 from net.imglib2.type.numeric.real import FloatType
+from net.imglib2.type.numeric.complex import ComplexFloatType
 from net.imglib2.view import Views
+from java.lang import Float
 
 def rltv_deconvolution(image, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor):
     """Deconvolve an image with the Richardson-Lucy Total Variation (RTLV) algorithm.  
     """
-    image = ops.convert().float32(image)
     psf_size = FinalDimensions(image.dimensionsAsLongArray())
     wavelength = float(wavelength) * 1E-9
     xy_res = xy_res * 1E-6
     z_res = z_res * 1E-6
     p_z = p_z * 1E-6
-    psf = ops.create().kernelDiffraction(
-        psf_size,
-        na,
-        wavelength,
-        ri_sample,
-        ri_immersion,
-        xy_res,
-        z_res,
-        p_z,
-        FloatType()
-        )
+    psf = ops.op("create.kernelDiffraction").input(psf_size,
+                                                   na,
+                                                   wavelength,
+                                                   ri_sample,
+                                                   ri_immersion,
+                                                   xy_res,
+                                                   z_res,
+                                                   p_z,
+                                                   FloatType()
+                                               ).apply()
 
-    return ops.deconvolve().richardsonLucyTV(image, psf, iterations, reg_factor)
+    return ops.op("deconvolve.richardsonLucyTV").input(image,
+                                                       psf,
+                                                       FloatType(),
+                                                       ComplexFloatType(),
+                                                       iterations,
+                                                       False,
+                                                       False,
+                                                       Float(reg_factor)).apply()
+
 
 def suppress_background(image):
+    """Supress the background with a mean and Gaussian high pass filter.  
+    """
     # apply mean filter
-    image = ops.convert().float32(image)
+    shape = HyperSphereShape(radius)
     if mean_filter_dim == "3D":
-        image_mean = ops.create().img(image)
-        ops.filter().mean(image_mean, img, HyperSphereShape(radius))
+        img_mean = ops.op("create.img").input(image, FloatType()).apply()
+        ops.op("filter.mean").input(image, shape).output(img_mean).compute()
     else:
-        shape = HyperSphereShape(radius)
         stack = []
         for i in range(image.dimensionsAsLongArray()[2]):
-            view = ops.transform().hyperSliceView(image, 2, i)
-            m_img = ops.create().img(view)
-            ops.filter().mean(m_img, view, shape)
-            stack.append(ops.transform().addDimensionView(m_img, 1, 1))
-        image_mean = Views.concatenate(2, stack)
-    image = ops.math().multiply(image, image_mean)
+            view = ops.op("transform.hyperSliceView").input(img, 2, i).apply()
+            m_img = ops.op("create.img").input(view).apply()
+            ops.op("filter.mean").input(view, shape).output(m_img).compute()
+            stack.append(ops.op("transform.addDimensionView").input(m_img, 1, 1).apply())
+        img_mean = Views.concatenate(2, stack)
+    # multiply the mean with the input image
+    img_mul = ops.op("create.img").input(image, FloatType()).apply()
+    img_blur = ops.op("create.img").input(image, FloatType()).apply()
+    ops.op("math.multiply").input(image, img_mean).output(img_mul).compute()
     # apply high pass Gaussian filter
-    image_gauss = ops.filter().gauss(image, sigma)
+    img_blur = ops.op("filter.gauss").input(img_mul, sigma).apply()
 
-    return ops.math().subtract(image, image_gauss)
+    return ops.op("math.subtract").input(img_mul, img_blur).apply()
+
+
+def to_f32(image):
+    """Convert the input image to float32.
+    """
+    img_float = ops.op("create.img").input(img, FloatType()).apply()
+    ops.op("convert.float32").input(image).output(img_float).compute()
+
+    return img_float
+
+
+def segment(image):
+    """Use simple threshold and CCA to create label image segmentation.
+    """
+    # apply threshold
+    # do CCA
+    # return labels
+    
+    return
 
 # TODO: Results table: two tables -> per cell ID table (ID, area, diameter, sphereoscity, MFI) and summary (total cells found, largest found (size), smallest found (size)) tablei
 # TODO: Results table 2D vs 3D title
 # TODO: Add size filter with min and maximum bounds
 
+image = to_f32(img)
 if do_rltv:
-    img = rltv_deconvolution(img, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor)
+    image = rltv_deconvolution(image, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor)
 if do_bksp:
-    img = suppress_background(img)
+    image = suppress_background(image)
 
-result = img
+result = image
