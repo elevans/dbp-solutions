@@ -17,7 +17,8 @@
 #@ Float (label="Gaussian blur Sigma:", style="format:0.00", min=0.0, value=25.00) sigma
 #@ String (visibility = MESSAGE, value ="<b>[ Segmentation settings ]</b>", required = false) seg_msg
 #@ String (label="Global threshold method:", choices={"huang", "ij1", "intermodes", "isoData", "li", "maxEntropy", "maxLikelihood", "mean", "minError", "minimum", "moments", "otsu", "percentile", "renyiEntropy", "rosin", "shanbhag", "triangle", "yen"}, style="listBox") method
-
+#@ Integer min_size(label="Minimum size (pixels):", min=0, value=0)
+#@ Integer max_size(label="Maximum size (pixels):", value=0)
 #@ String (visibility = MESSAGE, value ="<b>[ Data pre-processing settings ]</b>", required = false) pp_msg
 #@ Boolean (label = "RLTV deconvolution:", value = true) do_rltv
 #@ Boolean (label = "Suppress background:", value = true) do_bksp
@@ -26,11 +27,26 @@
 from net.imglib2 import FinalDimensions
 from net.imglib2.algorithm.labeling.ConnectedComponents import StructuringElement
 from net.imglib2.algorithm.neighborhood import HyperSphereShape
-from net.imglib2.type.numeric.logic import BitType
+from net.imglib2.roi.labeling import ImgLabeling, LabelRegions
+from net.imglib2.roi import Regions
+from net.imglib2.type.logic import BitType
 from net.imglib2.type.numeric.real import FloatType
 from net.imglib2.type.numeric.complex import ComplexFloatType
 from net.imglib2.view import Views
 from java.lang import Float
+
+def filter_labeling(index_img, labeling, min_size, max_size):
+    """Filter an index image's labels by minimum/maximum pixel size exclusion.
+    """
+    # get the label regions from the labeling
+    regs = LabelRegions(labeling)
+    for r in regs:
+        # get a sample region and compute the size
+        sample = Regions.sample(r, index_img)
+        size = float(ops.op("stats.size").input(sample).apply())
+        # if region size is outside of min/max range set to zero
+        if size <= float(min_size) or size >= float(max_size):
+            remove_label(sample)
 
 def rltv_deconvolution(image, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor):
     """Deconvolve an image with the Richardson-Lucy Total Variation (RTLV) algorithm.  
@@ -59,6 +75,15 @@ def rltv_deconvolution(image, na, wavelength, ri_sample, ri_immersion, xy_res, z
                                                        False,
                                                        False,
                                                        Float(reg_factor)).apply()
+
+
+def remove_label(sample):
+    """Set the given sample region pixel values to 0.
+    """
+    c = sample.cursor()
+    while c.hasNext():
+        c.fwd()
+        c.get().set(0)
 
 
 def suppress_background(image):
@@ -100,19 +125,21 @@ def segment(image):
     """Use simple threshold and CCA to create label image segmentation.
     """
     # apply threshold
-    # do CCA
-    # return labels
+    mask = ops.op("create.img").input(image, BitType()).apply()
+    ops.op("threshold.{}".format(method)).input(image).output(mask).compute()
+    labeling = ops.op("labeling.cca").input(mask, StructuringElement.FOUR_CONNECTED).apply()
     
-    return
+    return labeling
 
 # TODO: Results table: two tables -> per cell ID table (ID, area, diameter, sphereoscity, MFI) and summary (total cells found, largest found (size), smallest found (size)) tablei
 # TODO: Results table 2D vs 3D title
-# TODO: Add size filter with min and maximum bounds
 
 image = to_f32(img)
 if do_rltv:
     image = rltv_deconvolution(image, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor)
 if do_bksp:
     image = suppress_background(image)
+labeling = segment(image)
+filter_labeling(labeling.getIndexImg(), labeling, min_size, max_size)
+result = labeling.getIndexImg()
 
-result = image
