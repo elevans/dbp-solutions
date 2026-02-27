@@ -1,4 +1,6 @@
 #@ OpEnvironment ops
+#@ OpService ijops
+#@ ConvertService cs
 #@ UIService ui
 #@ Img (label = "Input image:", autofill = false) img
 #@ String (visibility = MESSAGE, value ="<b>[ Richardson-Lucy Total Variation (RLTV) deconvolution settings ]</b>", required = false) decon_msg
@@ -22,7 +24,6 @@
 #@ String (visibility = MESSAGE, value ="<b>[ Data pre-processing settings ]</b>", required = false) pp_msg
 #@ Boolean (label = "RLTV deconvolution:", value = true) do_rltv
 #@ Boolean (label = "Suppress background:", value = true) do_bksp
-#@output Img result
 
 from net.imglib2 import FinalDimensions
 from net.imglib2.algorithm.labeling.ConnectedComponents import StructuringElement
@@ -33,6 +34,7 @@ from net.imglib2.type.logic import BitType
 from net.imglib2.type.numeric.real import FloatType
 from net.imglib2.type.numeric.complex import ComplexFloatType
 from net.imglib2.view import Views
+from org.scijava.table import DefaultGenericTable
 from java.lang import Float
 
 def filter_labeling(index_img, labeling, min_size, max_size):
@@ -47,6 +49,7 @@ def filter_labeling(index_img, labeling, min_size, max_size):
         # if region size is outside of min/max range set to zero
         if size <= float(min_size) or size >= float(max_size):
             remove_label(sample)
+
 
 def rltv_deconvolution(image, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor):
     """Deconvolve an image with the Richardson-Lucy Total Variation (RTLV) algorithm.  
@@ -66,6 +69,7 @@ def rltv_deconvolution(image, na, wavelength, ri_sample, ri_immersion, xy_res, z
                                                    p_z,
                                                    FloatType()
                                                ).apply()
+
 
     return ops.op("deconvolve.richardsonLucyTV").input(image,
                                                        psf,
@@ -112,15 +116,6 @@ def suppress_background(image):
     return ops.op("math.subtract").input(img_mul, img_blur).apply()
 
 
-def to_f32(image):
-    """Convert the input image to float32.
-    """
-    img_float = ops.op("create.img").input(img, FloatType()).apply()
-    ops.op("convert.float32").input(image).output(img_float).compute()
-
-    return img_float
-
-
 def segment(image):
     """Use simple threshold and CCA to create label image segmentation.
     """
@@ -131,6 +126,58 @@ def segment(image):
     
     return labeling
 
+
+def to_f32(image):
+    """Convert the input image to float32.
+    """
+    img_float = ops.op("create.img").input(img, FloatType()).apply()
+    ops.op("convert.float32").input(image).output(img_float).compute()
+
+    return img_float
+
+
+def measurements(image, labeling):
+    rt = DefaultGenericTable(5, 0)
+    st = DefaultGenericTable(3, 0)
+    rt.setColumnHeader(0, "ID")
+    rt.setColumnHeader(1, "Size (pixels)")
+    rt.setColumnHeader(2, "Min")
+    rt.setColumnHeader(3, "Max")
+    rt.setColumnHeader(4, "MFI")
+    st.setColumnHeader(0, "Total cells found")
+    st.setColumnHeader(1, "Largest found size")
+    st.setColumnHeader(2, "Smallest found size")
+    obj_regions = LabelRegions(labeling)
+    labels = labeling.getIndexImg()
+    i = 0
+    obj_sizes = []
+    for r in obj_regions:
+        samp_data = Regions.sample(r, image)
+        samp_label = Regions.sample(r, labels)
+        id = samp_label.firstElement()
+        size = ops.op("stats.size").input(samp_data).apply()
+        obj_sizes.append(size)
+        min_val = ops.op("stats.min").input(samp_data).apply()
+        max_val = ops.op("stats.max").input(samp_data).apply()
+        mfi = ijops.stats().mean(samp_data).getRealDouble()
+        # todo for 2D
+        # contour = ops.op("geom.contour").input(r, True).apply()
+        # diam = ops.op("geom.feretsDiameter").input(contour).apply()
+        rt.appendRow()
+        rt.set("ID", i, id)
+        rt.set("Size (pixels)", i, size)
+        rt.set("Min", i, min_val)
+        rt.set("Max", i, max_val)
+        rt.set("MFI", i, mfi)
+        i += 1
+
+    st.appendRow()
+    st.set("Total cells found", 0, i)
+    st.set("Largest found size", 0, max(obj_sizes))
+    st.set("Smallest found size", 0, min(obj_sizes))
+
+    return (rt, st)
+
 # TODO: Results table: two tables -> per cell ID table (ID, area, diameter, sphereoscity, MFI) and summary (total cells found, largest found (size), smallest found (size)) tablei
 # TODO: Results table 2D vs 3D title
 
@@ -140,6 +187,10 @@ if do_rltv:
 if do_bksp:
     image = suppress_background(image)
 labeling = segment(image)
-filter_labeling(labeling.getIndexImg(), labeling, min_size, max_size)
-result = labeling.getIndexImg()
+label_img = labeling.getIndexImg()
+filter_labeling(label_img, labeling, min_size, max_size)
+tables = measurements(img, cs.convert(label_img, ImgLabeling))
 
+ui.show("Label image", label_img)
+ui.show("Results Table", tables[0])
+ui.show("Summary Table", tables[1])
