@@ -135,15 +135,22 @@ def to_f32(image):
 
     return img_float
 
-
+def to_mesh(image):
+    mask = ops.op("create.img").input(image, BitType()).apply()
+    ops.op("threshold.apply").input(image, 1.0).output(mask).compute()
+    
+    return ijops.geom().marchingCubes(mask)
+    
 def measurements(image, labeling):
-    rt = DefaultGenericTable(5, 0)
+    rt = DefaultGenericTable(7, 0)
     st = DefaultGenericTable(3, 0)
     rt.setColumnHeader(0, "ID")
     rt.setColumnHeader(1, "Size (pixels)")
     rt.setColumnHeader(2, "Min")
     rt.setColumnHeader(3, "Max")
     rt.setColumnHeader(4, "MFI")
+    rt.setColumnHeader(5, "Sphericity (3D)")
+    rt.setColumnHeader(6, "Size (3D)")
     st.setColumnHeader(0, "Total cells found")
     st.setColumnHeader(1, "Largest found size")
     st.setColumnHeader(2, "Smallest found size")
@@ -160,15 +167,17 @@ def measurements(image, labeling):
         min_val = ops.op("stats.min").input(samp_data).apply()
         max_val = ops.op("stats.max").input(samp_data).apply()
         mfi = ijops.stats().mean(samp_data).getRealDouble()
-        # todo for 2D
-        # contour = ops.op("geom.contour").input(r, True).apply()
-        # diam = ops.op("geom.feretsDiameter").input(contour).apply()
+        samp_mesh = to_mesh(samp_label)
+        mesh_size = ijops.geom().size(samp_mesh).getRealDouble()
+        mesh_sphericity = ijops.geom().sphericity(samp_mesh).getRealDouble()
         rt.appendRow()
         rt.set("ID", i, id)
         rt.set("Size (pixels)", i, size)
         rt.set("Min", i, min_val)
         rt.set("Max", i, max_val)
         rt.set("MFI", i, mfi)
+        rt.set("Sphericity (3D)", i, mesh_sphericity)
+        rt.set("Size (3D)", i, mesh_size)
         i += 1
 
     st.appendRow()
@@ -178,9 +187,6 @@ def measurements(image, labeling):
 
     return (rt, st)
 
-# TODO: Results table: two tables -> per cell ID table (ID, area, diameter, sphereoscity, MFI) and summary (total cells found, largest found (size), smallest found (size)) tablei
-# TODO: Results table 2D vs 3D title
-
 image = to_f32(img)
 if do_rltv:
     image = rltv_deconvolution(image, na, wavelength, ri_sample, ri_immersion, xy_res, z_res, p_z, iterations, reg_factor)
@@ -189,8 +195,9 @@ if do_bksp:
 labeling = segment(image)
 label_img = labeling.getIndexImg()
 filter_labeling(label_img, labeling, min_size, max_size)
-tables = measurements(img, cs.convert(label_img, ImgLabeling))
+labeling_filtered = cs.convert(label_img, ImgLabeling)
+tables = measurements(img, labeling_filtered)
 
-ui.show("Label image", label_img)
+ui.show("Label image", labeling_filtered.getIndexImg())
 ui.show("Results Table", tables[0])
 ui.show("Summary Table", tables[1])
