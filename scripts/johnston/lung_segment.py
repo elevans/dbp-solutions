@@ -40,6 +40,8 @@ def filter_labeling(index_img, labeling, min_size, max_size):
     """Filter an index image's labels by minimum/maximum pixel size exclusion.
     """
     # get the label regions from the labeling
+    if min_size == 0 and max_size == 0:
+        return
     regs = LabelRegions(labeling)
     for r in regs:
         # get a sample region and compute the size
