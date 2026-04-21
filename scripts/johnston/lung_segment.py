@@ -15,7 +15,6 @@
 #@ Float (label="Regularization factor", style="format:0.00000", min=0.00000, value=0.002) reg_factor
 #@ String (visibility = MESSAGE, value ="<b>[ Background suppression settings ]</b>", required = false) bk_msg
 #@ Integer (label = "Mean filter radius:", min = 0, value = 6) radius
-#@ String (label = "Mean filter dimensonality:", choices={"2D", "3D"}, style="listBox", value = "3D") mean_filter_dim
 #@ Float (label="Gaussian blur Sigma:", style="format:0.00", min=0.0, value=25.00) sigma
 #@ String (visibility = MESSAGE, value ="<b>[ Segmentation settings ]</b>", required = false) seg_msg
 #@ String (label="Global threshold method:", choices={"huang", "ij1", "intermodes", "isoData", "li", "maxEntropy", "maxLikelihood", "mean", "minError", "minimum", "moments", "otsu", "percentile", "renyiEntropy", "rosin", "shanbhag", "triangle", "yen"}, style="listBox") method
@@ -95,22 +94,16 @@ def suppress_background(image):
     """
     # apply mean filter
     shape = HyperSphereShape(radius)
-    if mean_filter_dim == "3D":
-        img_mean = ops.op("create.img").input(image, FloatType()).apply()
-        ops.op("filter.mean").input(image, shape).output(img_mean).compute()
-    else:
-        stack = []
-        for i in range(image.dimensionsAsLongArray()[2]):
-            view = ops.op("transform.hyperSliceView").input(img, 2, i).apply()
-            m_img = ops.op("create.img").input(view).apply()
-            ops.op("filter.mean").input(view, shape).output(m_img).compute()
-            stack.append(ops.op("transform.addDimensionView").input(m_img, 1, 1).apply())
-        img_mean = Views.concatenate(2, stack)
+    stack = []
+    for i in range(image.dimensionsAsLongArray()[2]):
+        view = ops.op("transform.hyperSliceView").input(image, 2, i).apply()
+        m_img = ops.op("create.img").input(view).apply()
+        ops.op("filter.mean").input(view, shape).output(m_img).compute()
+        stack.append(ops.op("transform.addDimensionView").input(m_img, 1, 1).apply())
+    img_mean = Views.concatenate(2, stack)
     # multiply the mean with the input image
-    img_mul = ops.op("create.img").input(image, FloatType()).apply()
     img_blur = ops.op("create.img").input(image, FloatType()).apply()
-    ops.op("math.multiply").input(image, img_mean).output(img_mul).compute()
-    # apply high pass Gaussian filter
+    img_mul = ijops.math().multiply(image, img_mean)
     img_blur = ops.op("filter.gauss").input(img_mul, sigma).apply()
 
     return ops.op("math.subtract").input(img_mul, img_blur).apply()
